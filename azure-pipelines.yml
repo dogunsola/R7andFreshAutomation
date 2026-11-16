@@ -11,8 +11,7 @@ schedules:
 
 variables:
   - group: "New version for automation"
-  - name: PYTHON_VERSION
-    value: "3.10"
+
 
 pool:
   name: "Security-Agent-Pool"
@@ -25,15 +24,17 @@ jobs:
     steps:
       - checkout: self
 
-      - task: UsePythonVersion@0
-        displayName: Use Python $(PYTHON_VERSION)
-        inputs:
-          versionSpec: "$(PYTHON_VERSION)"
-
       - script: |
+          set -euo pipefail
           cd "patch automation"
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,azure]"
+
+          echo "Using:"
+          python3 --version
+          which python3
+
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev,azure]"
         displayName: Install dependencies
 
       - script: |
