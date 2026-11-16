@@ -20,9 +20,7 @@ class ConsoleExportTests(unittest.TestCase):
             "https://example.freshservice.com/api/v2"
         )
 
-        def page(
-            records,
-        ):
+        def page(records):
             return {
                 "resources": records,
                 "page": {
@@ -131,7 +129,7 @@ class ConsoleExportTests(unittest.TestCase):
                 "resources": [
                     "apache-upgrade",
                     "apache-configure",
-                ]
+                ],
             },
             (
                 "GET",
@@ -163,9 +161,7 @@ class ConsoleExportTests(unittest.TestCase):
                     {
                         "checkId": "apache-check",
                         "status": "vulnerable-version",
-                        "proof": (
-                            "<p>Apache version 2.4.0</p>"
-                        ),
+                        "proof": "<p>Apache version 2.4.0</p>",
                     }
                 ]
             },
@@ -230,7 +226,9 @@ class ConsoleExportTests(unittest.TestCase):
                     f"Unexpected Rapid7 request: {key}",
                 )
 
-                return responses[key]
+                return responses[
+                    key
+                ]
 
             self.assertTrue(
                 url.startswith(
@@ -325,47 +323,65 @@ class ConsoleExportTests(unittest.TestCase):
                 ]
 
                 self.assertEqual(
-                    payload["email"],
+                    payload[
+                        "email"
+                    ],
                     "security@example.com",
                 )
 
                 self.assertEqual(
-                    payload["status"],
+                    payload[
+                        "status"
+                    ],
                     2,
                 )
 
                 self.assertEqual(
-                    payload["urgency"],
+                    payload[
+                        "urgency"
+                    ],
                     2,
                 )
 
                 self.assertEqual(
-                    payload["impact"],
+                    payload[
+                        "impact"
+                    ],
                     2,
                 )
 
                 self.assertEqual(
-                    payload["priority"],
+                    payload[
+                        "priority"
+                    ],
                     2,
                 )
 
                 self.assertEqual(
-                    payload["workspace_id"],
+                    payload[
+                        "workspace_id"
+                    ],
                     42,
                 )
 
                 self.assertEqual(
-                    payload["group_id"],
+                    payload[
+                        "group_id"
+                    ],
                     84,
                 )
 
                 self.assertEqual(
-                    payload["category"],
+                    payload[
+                        "category"
+                    ],
                     "Digital Security",
                 )
 
                 self.assertEqual(
-                    payload["sub_category"],
+                    payload[
+                        "sub_category"
+                    ],
                     "Vulnerability Management",
                 )
 
@@ -397,7 +413,9 @@ class ConsoleExportTests(unittest.TestCase):
                 )
 
                 self.assertIn(
-                    payload["subject"],
+                    payload[
+                        "subject"
+                    ],
                     description,
                 )
 
@@ -406,8 +424,14 @@ class ConsoleExportTests(unittest.TestCase):
                     description,
                 )
 
+                # Rapid7 proof content is intentionally HTML-escaped
+                # before being embedded inside the Freshservice ticket.
                 self.assertIn(
-                    "<p>Apache version 2.4.0</p>",
+                    (
+                        "<pre>"
+                        "&lt;p&gt;Apache version 2.4.0&lt;/p&gt;"
+                        "</pre>"
+                    ),
                     description,
                 )
 
@@ -415,7 +439,9 @@ class ConsoleExportTests(unittest.TestCase):
                     payload
                 )
 
-                return responses[key]
+                return responses[
+                    key
+                ]
 
             self.fail(
                 "Unexpected Freshservice request: "
@@ -437,12 +463,18 @@ class ConsoleExportTests(unittest.TestCase):
                                 "/api/3"
                             )
                         ),
-                        "RAPID7_CONSOLE_USERNAME": "user",
-                        "RAPID7_CONSOLE_PASSWORD": "password",
+                        "RAPID7_CONSOLE_USERNAME": (
+                            "user"
+                        ),
+                        "RAPID7_CONSOLE_PASSWORD": (
+                            "password"
+                        ),
                         "FRESHSERVICE_DOMAIN": (
                             "https://example.freshservice.com"
                         ),
-                        "FRESHSERVICE_API_KEY": "fresh-key",
+                        "FRESHSERVICE_API_KEY": (
+                            "fresh-key"
+                        ),
                         "FRESHSERVICE_REQUESTER_EMAIL": (
                             "security@example.com"
                         ),
@@ -454,7 +486,9 @@ class ConsoleExportTests(unittest.TestCase):
                     [
                         "sync",
                         "--output",
-                        str(output),
+                        str(
+                            output
+                        ),
                         "--create-tickets",
                     ],
                 ),
@@ -474,7 +508,9 @@ class ConsoleExportTests(unittest.TestCase):
             ) as file:
                 self.assertEqual(
                     list(
-                        csv.reader(file)
+                        csv.reader(
+                            file
+                        )
                     ),
                     [
                         [
@@ -514,8 +550,9 @@ class ConsoleExportTests(unittest.TestCase):
                     ],
                 )
 
-        # The global paginated vulnerability catalog must not
-        # be called by the optimized CLI path.
+        # Performance regression check:
+        # the optimized CLI must not download the global
+        # paginated Rapid7 vulnerability catalog.
         self.assertNotIn(
             (
                 "GET",
@@ -524,8 +561,7 @@ class ConsoleExportTests(unittest.TestCase):
             seen,
         )
 
-        # Only the Critical non-Microsoft vulnerability should
-        # proceed to solution and proof lookup.
+        # Moderate vulnerabilities should not reach solution lookup.
         self.assertNotIn(
             (
                 "GET",
@@ -534,6 +570,8 @@ class ConsoleExportTests(unittest.TestCase):
             seen,
         )
 
+        # Rapid7 Microsoft Patch vulnerabilities should not reach
+        # solution lookup.
         self.assertNotIn(
             (
                 "GET",
@@ -592,7 +630,8 @@ class ConsoleExportTests(unittest.TestCase):
         actual_rapid7_requests = {
             key
             for key in seen
-            if key != (
+            if key
+            != (
                 "POST",
                 "/tickets",
             )
@@ -609,14 +648,19 @@ class ConsoleExportTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            len(ticket_bodies),
+            len(
+                ticket_bodies
+            ),
             2,
         )
 
         self.assertEqual(
             {
-                body["subject"]
-                for body in ticket_bodies
+                body[
+                    "subject"
+                ]
+                for body
+                in ticket_bodies
             },
             {
                 "Configure Apache",
@@ -625,8 +669,16 @@ class ConsoleExportTests(unittest.TestCase):
         )
 
         self.assertNotEqual(
-            ticket_bodies[0]["tags"],
-            ticket_bodies[1]["tags"],
+            ticket_bodies[
+                0
+            ][
+                "tags"
+            ],
+            ticket_bodies[
+                1
+            ][
+                "tags"
+            ],
         )
 
         self.assertEqual(
