@@ -15,7 +15,9 @@ variables:
     value: "3.10"
 
 pool:
-  vmImage: ubuntu-latest
+  name: "Security-Agent-Pool"
+  demands:
+    - Agent.Name -equals vm-azusvwpbd01-agent
 
 jobs:
   - job: sync
