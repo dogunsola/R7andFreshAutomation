@@ -41,13 +41,6 @@ jobs:
           python -m pytest
         displayName: Run tests
 
-      - task: AzureKeyVault@2
-        inputs:
-          azureSubscription: "Patch Automation"
-          KeyVaultName: "kv-patch-automation"
-          SecretsFilter: "rapid7-console-username,rapid7-console-password,freshservice-api-key,freshservice-requester-email"
-          RunAsPreJob: true
-
       - script: |
           set -euo pipefail
           cd "patch automation"
