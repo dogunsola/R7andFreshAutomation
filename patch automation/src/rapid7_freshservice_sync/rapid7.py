@@ -1,6 +1,6 @@
 import base64
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -33,9 +33,6 @@ class Rapid7SolutionClient:
                 "Rapid7 asset group must not be empty"
             )
 
-        self.page_size = page_size
-        self.asset_group = asset_group
-
         parsed = urlparse(console_url)
 
         if (
@@ -53,12 +50,18 @@ class Rapid7SolutionClient:
                 "e.g. https://console:3780"
             )
 
-        if not username or ":" in username or not password:
+        if (
+            not username
+            or ":" in username
+            or not password
+        ):
             raise ValueError(
                 "Rapid7 console username and password are required; "
                 "username cannot contain ':'"
             )
 
+        self.page_size = page_size
+        self.asset_group = asset_group
         self.base_url = console_url.rstrip("/") + "/api/3"
 
         token = base64.b64encode(
@@ -70,14 +73,24 @@ class Rapid7SolutionClient:
                 "Authorization": f"Basic {token}",
                 "Accept": "application/json",
             },
-            allowed_hosts={parsed.hostname},
+            allowed_hosts={
+                parsed.hostname,
+            },
         )
 
-        self._solutions: dict[str, dict[str, Any]] = {}
+        self._solutions: dict[
+            str,
+            dict[str, Any],
+        ] = {}
 
         self._vulnerabilities: dict[
             str,
             list[dict[str, Any]],
+        ] = {}
+
+        self._vulnerability_details: dict[
+            str,
+            dict[str, Any],
         ] = {}
 
         self._asset_vulnerability_proofs: dict[
@@ -85,21 +98,154 @@ class Rapid7SolutionClient:
             list[dict[str, Any]],
         ] = {}
 
+    def get_vulnerability(
+        self,
+        vulnerability_id: str,
+    ) -> dict[str, Any]:
+        """
+        Retrieve and cache one vulnerability definition.
+
+        This avoids downloading the complete Rapid7 vulnerability catalog
+        when only a smaller set of vulnerabilities is active on the scoped
+        assets.
+        """
+
+        vulnerability_id = str(
+            vulnerability_id
+        ).strip()
+
+        if not vulnerability_id:
+            raise ValueError(
+                "Rapid7 vulnerability ID must not be empty"
+            )
+
+        if vulnerability_id in self._vulnerability_details:
+            return self._vulnerability_details[
+                vulnerability_id
+            ]
+
+        encoded_vulnerability_id = quote(
+            vulnerability_id,
+            safe="",
+        )
+
+        payload = self.http.request_json(
+            "GET",
+            (
+                f"{self.base_url}/vulnerabilities/"
+                f"{encoded_vulnerability_id}"
+            ),
+            timeout=300,
+        )
+
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "Rapid7 returned an invalid vulnerability response for "
+                f"{vulnerability_id!r}; expected an object, received "
+                f"{type(payload).__name__}"
+            )
+
+        vulnerability = {
+            **payload,
+            "id": str(
+                payload.get("id")
+                or vulnerability_id
+            ),
+        }
+
+        self._vulnerability_details[
+            vulnerability_id
+        ] = vulnerability
+
+        return vulnerability
+
+    def iter_vulnerabilities(
+        self,
+        vulnerability_ids: Iterable[str],
+    ) -> Iterator[dict[str, Any]]:
+        """
+        Retrieve only the requested vulnerability definitions.
+
+        The method preserves the original filtering requirements:
+
+        - Critical and Severe vulnerabilities only.
+        - Exclude vulnerabilities categorized as Microsoft Patch.
+        """
+
+        normalized_ids = sorted(
+            {
+                str(vulnerability_id).strip()
+                for vulnerability_id in vulnerability_ids
+                if str(vulnerability_id).strip()
+            }
+        )
+
+        total = len(normalized_ids)
+
+        for index, vulnerability_id in enumerate(
+            normalized_ids,
+            start=1,
+        ):
+            if index == 1 or index % 100 == 0 or index == total:
+                LOG.info(
+                    "Downloading Rapid7 vulnerability details: %s/%s",
+                    index,
+                    total,
+                )
+
+            vulnerability = self.get_vulnerability(
+                vulnerability_id
+            )
+
+            severity = str(
+                vulnerability.get(
+                    "severity",
+                    "",
+                )
+            ).lower()
+
+            if severity not in {
+                "critical",
+                "severe",
+            }:
+                continue
+
+            categories = vulnerability.get(
+                "categories",
+                [],
+            )
+
+            if not isinstance(
+                categories,
+                (list, tuple),
+            ):
+                categories = []
+
+            if any(
+                str(category).strip().lower()
+                == "microsoft patch"
+                for category in categories
+            ):
+                continue
+
+            yield vulnerability
+
     def get_vulnerability_solutions(
         self,
         vulnerability_id: str,
     ) -> list[dict[str, Any]]:
         """
-        Retrieve and cache remediation solutions for a vulnerability.
+        Retrieve and cache Rapid7 remediation solutions.
 
-        If Rapid7 returns a dictionary without a resources collection,
-        the vulnerability is treated as having no detailed solution
-        records. The transform layer can then fall back to remediation
-        information from the vulnerability catalog.
+        If Rapid7 returns a valid response without a resources collection,
+        return an empty list. The transformation layer can then fall back
+        to remediation details in the vulnerability catalog.
         """
 
         if vulnerability_id in self._vulnerabilities:
-            return self._vulnerabilities[vulnerability_id]
+            return self._vulnerabilities[
+                vulnerability_id
+            ]
 
         encoded_vulnerability_id = quote(
             vulnerability_id,
@@ -130,10 +276,16 @@ class Rapid7SolutionClient:
                 "Response keys: %s. The catalog remediation will be used "
                 "as a fallback.",
                 vulnerability_id,
-                sorted(str(key) for key in payload),
+                sorted(
+                    str(key)
+                    for key in payload
+                ),
             )
 
-            self._vulnerabilities[vulnerability_id] = []
+            self._vulnerabilities[
+                vulnerability_id
+            ] = []
+
             return []
 
         if not isinstance(resources, list):
@@ -144,7 +296,9 @@ class Rapid7SolutionClient:
                 f"{type(resources).__name__}"
             )
 
-        solutions: list[dict[str, Any]] = []
+        solutions: list[
+            dict[str, Any]
+        ] = []
 
         for solution_id in resources:
             if (
@@ -163,7 +317,10 @@ class Rapid7SolutionClient:
 
                 solution = self.http.request_json(
                     "GET",
-                    f"{self.base_url}/solutions/{encoded_solution_id}",
+                    (
+                        f"{self.base_url}/solutions/"
+                        f"{encoded_solution_id}"
+                    ),
                 )
 
                 if not isinstance(solution, dict):
@@ -173,16 +330,23 @@ class Rapid7SolutionClient:
                         f"object, received {type(solution).__name__}"
                     )
 
-                self._solutions[solution_id] = {
+                self._solutions[
+                    solution_id
+                ] = {
                     **solution,
                     "id": solution_id,
                 }
 
             solutions.append(
-                self._solutions[solution_id]
+                self._solutions[
+                    solution_id
+                ]
             )
 
-        self._vulnerabilities[vulnerability_id] = solutions
+        self._vulnerabilities[
+            vulnerability_id
+        ] = solutions
+
         return solutions
 
     def get_asset_vulnerability_proof(
@@ -209,8 +373,9 @@ class Rapid7SolutionClient:
             payload = self.http.request_json(
                 "GET",
                 (
-                    f"{self.base_url}/assets/{encoded_asset_id}/"
-                    f"vulnerabilities/{encoded_vulnerability_id}"
+                    f"{self.base_url}/assets/"
+                    f"{encoded_asset_id}/vulnerabilities/"
+                    f"{encoded_vulnerability_id}"
                 ),
             )
 
@@ -229,7 +394,9 @@ class Rapid7SolutionClient:
                     "Rapid7 returned invalid asset vulnerability results"
                 )
 
-            proofs: list[dict[str, Any]] = []
+            proofs: list[
+                dict[str, Any]
+            ] = []
 
             for result in results:
                 if not isinstance(result, dict):
@@ -242,10 +409,15 @@ class Rapid7SolutionClient:
                     or ""
                 )
 
-                if not status.lower().startswith("vulnerable"):
+                if not status.lower().startswith(
+                    "vulnerable"
+                ):
                     continue
 
-                proof = result.get("proof") or ""
+                proof = (
+                    result.get("proof")
+                    or ""
+                )
 
                 if not isinstance(proof, str):
                     raise ValueError(
@@ -258,7 +430,9 @@ class Rapid7SolutionClient:
                 proofs.append(
                     {
                         "check_id": str(
-                            result.get("checkId")
+                            result.get(
+                                "checkId"
+                            )
                             or ""
                         ),
                         "status": status,
@@ -266,9 +440,13 @@ class Rapid7SolutionClient:
                     }
                 )
 
-            self._asset_vulnerability_proofs[key] = proofs
+            self._asset_vulnerability_proofs[
+                key
+            ] = proofs
 
-        return self._asset_vulnerability_proofs[key]
+        return self._asset_vulnerability_proofs[
+            key
+        ]
 
 
 class Rapid7Client(Rapid7SolutionClient):
@@ -283,7 +461,10 @@ class Rapid7Client(Rapid7SolutionClient):
         page = 0
 
         while True:
-            kwargs: dict[str, Any] = {
+            kwargs: dict[
+                str,
+                Any,
+            ] = {
                 "params": {
                     **(params or {}),
                     "page": page,
@@ -293,7 +474,9 @@ class Rapid7Client(Rapid7SolutionClient):
             }
 
             if body is not None:
-                kwargs["json_body"] = body
+                kwargs[
+                    "json_body"
+                ] = body
 
             payload = self.http.request_json(
                 method,
@@ -301,11 +484,59 @@ class Rapid7Client(Rapid7SolutionClient):
                 **kwargs,
             )
 
-            yield from payload["resources"]
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    "Rapid7 returned an invalid paginated response for "
+                    f"{path!r}"
+                )
 
-            if page + 1 >= int(
-                payload["page"]["totalPages"]
-            ):
+            resources = payload.get(
+                "resources"
+            )
+
+            if not isinstance(resources, list):
+                raise ValueError(
+                    "Rapid7 returned an invalid resources collection for "
+                    f"{path!r}"
+                )
+
+            for resource in resources:
+                if not isinstance(resource, dict):
+                    raise ValueError(
+                        "Rapid7 returned an invalid resource for "
+                        f"{path!r}"
+                    )
+
+                yield resource
+
+            page_data = payload.get(
+                "page"
+            )
+
+            if not isinstance(page_data, dict):
+                raise ValueError(
+                    "Rapid7 returned invalid pagination information for "
+                    f"{path!r}"
+                )
+
+            total_pages = page_data.get(
+                "totalPages"
+            )
+
+            try:
+                total_pages_int = int(
+                    total_pages
+                )
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+                raise ValueError(
+                    "Rapid7 returned an invalid totalPages value for "
+                    f"{path!r}: {total_pages!r}"
+                ) from exc
+
+            if page + 1 >= total_pages_int:
                 return
 
             page += 1
@@ -313,6 +544,13 @@ class Rapid7Client(Rapid7SolutionClient):
     def iter_vulnerability_catalog(
         self,
     ) -> Iterator[dict[str, Any]]:
+        """
+        Retained for compatibility and testing.
+
+        The optimized production workflow uses iter_vulnerabilities()
+        instead of downloading the complete catalog.
+        """
+
         for vulnerability in self._pages(
             "/vulnerabilities"
         ):
@@ -334,8 +572,14 @@ class Rapid7Client(Rapid7SolutionClient):
                 [],
             )
 
+            if not isinstance(
+                categories,
+                (list, tuple),
+            ):
+                categories = []
+
             if any(
-                str(category).lower()
+                str(category).strip().lower()
                 == "microsoft patch"
                 for category in categories
             ):
@@ -354,7 +598,12 @@ class Rapid7Client(Rapid7SolutionClient):
                     "name": self.asset_group,
                 },
             )
-            if group["name"].casefold()
+            if str(
+                group.get(
+                    "name",
+                    "",
+                )
+            ).casefold()
             == self.asset_group.casefold()
         ]
 
@@ -365,7 +614,11 @@ class Rapid7Client(Rapid7SolutionClient):
             )
 
         group_id = quote(
-            str(groups[0]["id"]),
+            str(
+                groups[0][
+                    "id"
+                ]
+            ),
             safe="",
         )
 
@@ -377,9 +630,27 @@ class Rapid7Client(Rapid7SolutionClient):
             ),
         )
 
+        if not isinstance(membership, dict):
+            raise ValueError(
+                "Rapid7 returned invalid asset group membership data"
+            )
+
+        membership_resources = membership.get(
+            "resources"
+        )
+
+        if not isinstance(
+            membership_resources,
+            list,
+        ):
+            raise ValueError(
+                "Rapid7 returned an invalid asset group membership "
+                "resources collection"
+            )
+
         member_ids = {
             str(asset_id)
-            for asset_id in membership["resources"]
+            for asset_id in membership_resources
         }
 
         if not member_ids:
@@ -401,11 +672,17 @@ class Rapid7Client(Rapid7SolutionClient):
             method="POST",
             body=criteria,
         ):
-            if str(asset["id"]) not in member_ids:
+            asset_id_value = asset.get(
+                "id"
+            )
+
+            if str(
+                asset_id_value
+            ) not in member_ids:
                 continue
 
-            asset_id = quote(
-                str(asset["id"]),
+            encoded_asset_id = quote(
+                str(asset_id_value),
                 safe="",
             )
 
@@ -417,15 +694,19 @@ class Rapid7Client(Rapid7SolutionClient):
                 }
                 for finding in self._pages(
                     (
-                        f"/assets/{asset_id}/"
+                        f"/assets/{encoded_asset_id}/"
                         "vulnerabilities"
                     )
                 )
-                if finding["status"] == "vulnerable"
+                if (
+                    finding.get("status")
+                    == "vulnerable"
+                    and finding.get("id") is not None
+                )
             ]
 
             yield {
-                "id": asset["id"],
+                "id": asset_id_value,
                 "host_name": asset.get(
                     "hostName",
                     "",
