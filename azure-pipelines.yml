@@ -10,7 +10,7 @@ schedules:
     always: true
 
 variables:
-  - group: "Patch Automation"
+  - group: "New version for automation"
   - name: PYTHON_VERSION
     value: "3.10"
 
