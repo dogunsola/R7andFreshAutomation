@@ -2,8 +2,8 @@ trigger: none
 pr: none
 
 schedules:
-  - cron: "0 6 * * *"
-    displayName: Daily Rapid7 to Freshservice sync
+  - cron: "0 6 * * 1"
+    displayName: Weekly Rapid7 to Freshservice sync
     branches:
       include:
         - main
