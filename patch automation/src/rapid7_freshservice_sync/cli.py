@@ -6,131 +6,366 @@ from pathlib import Path
 
 from .freshservice import FreshserviceClient
 from .rapid7 import Rapid7Client
-from .secrets import AzureKeyVaultSecretProvider, EnvSecretProvider, default_secret_name
-from .transform import build_catalog, transform_assets, write_findings_csv
+from .secrets import (
+    AzureKeyVaultSecretProvider,
+    EnvSecretProvider,
+    default_secret_name,
+)
+from .transform import (
+    build_catalog,
+    transform_assets,
+    write_findings_csv,
+)
+
 
 LOG = logging.getLogger(__name__)
 
 
-def positive_int(value: str) -> int:
+def positive_int(
+    value: str,
+) -> int:
     try:
-        parsed = int(value)
+        parsed = int(
+            value
+        )
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+        raise argparse.ArgumentTypeError(
+            "must be a positive integer"
+        ) from exc
+
     if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
+        raise argparse.ArgumentTypeError(
+            "must be a positive integer"
+        )
+
     return parsed
 
 
-def safe_output_path(path: Path) -> Path:
+def required_positive_int(
+    value: str,
+    label: str,
+) -> int:
+    try:
+        return positive_int(
+            value
+        )
+    except argparse.ArgumentTypeError as exc:
+        raise SystemExit(
+            f"{label} must be a positive integer"
+        ) from exc
+
+
+def safe_output_path(
+    path: Path,
+) -> Path:
     if path.exists() and path.is_symlink():
-        raise SystemExit("Refusing to write output through a symbolic link")
+        raise SystemExit(
+            "Refusing to write output through a symbolic link"
+        )
+
     return path
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export InsightVM findings and create Freshservice tickets."
+        description=(
+            "Export InsightVM findings and create "
+            "Freshservice tickets."
+        )
     )
-    parser.add_argument("--asset-group", default="workstations/laptops",
-                        help="Exact Security Console asset group name")
-    parser.add_argument("--page-size", type=positive_int, default=500)
+
+    parser.add_argument(
+        "--asset-group",
+        default="workstations/laptops",
+        help=(
+            "Exact Security Console asset group name"
+        ),
+    )
+
+    parser.add_argument(
+        "--page-size",
+        type=positive_int,
+        default=500,
+    )
+
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("rapid7-freshservice-findings.csv"),
+        default=Path(
+            "rapid7-freshservice-findings.csv"
+        ),
         help="CSV output path",
     )
+
     parser.add_argument(
         "--hostname-fallback",
-        choices=("skip", "ip"),
+        choices=(
+            "skip",
+            "ip",
+        ),
         default="skip",
-        help="Behavior when an InsightVM asset has no hostname",
+        help=(
+            "Behavior when an InsightVM asset "
+            "has no hostname"
+        ),
     )
+
     parser.add_argument(
         "--create-tickets",
         action="store_true",
-        help="Create Freshservice tickets for findings not already open",
+        help=(
+            "Create Freshservice tickets for findings "
+            "not already open"
+        ),
     )
+
     parser.add_argument(
         "--secret-source",
-        choices=("env", "azure-keyvault"),
-        default=os.environ.get("SECRET_SOURCE", "env"),
-        help="Secret source for credentials (default: SECRET_SOURCE or env)",
+        choices=(
+            "env",
+            "azure-keyvault",
+        ),
+        default=os.environ.get(
+            "SECRET_SOURCE",
+            "env",
+        ),
+        help=(
+            "Secret source for credentials "
+            "(default: SECRET_SOURCE or env)"
+        ),
     )
+
     parser.add_argument(
         "--azure-key-vault-url",
-        default=os.environ.get("AZURE_KEY_VAULT_URL", ""),
-        help="Azure Key Vault URL when --secret-source azure-keyvault is used",
+        default=os.environ.get(
+            "AZURE_KEY_VAULT_URL",
+            "",
+        ),
+        help=(
+            "Azure Key Vault URL when --secret-source "
+            "azure-keyvault is used"
+        ),
     )
+
     parser.add_argument(
         "--freshservice-api-key-secret",
         default=None,
-        help="Secret name for the Freshservice API key",
+        help=(
+            "Secret name for the Freshservice API key"
+        ),
     )
+
     parser.add_argument(
         "--freshservice-requester-email-secret",
         default=None,
-        help="Secret name for the Freshservice requester email",
+        help=(
+            "Secret name for the Freshservice requester email"
+        ),
     )
+
     parser.add_argument(
         "--freshservice-domain",
-        default=os.environ.get("FRESHSERVICE_DOMAIN", ""),
-        help="Freshservice HTTPS domain, e.g. https://company.freshservice.com",
+        default=os.environ.get(
+            "FRESHSERVICE_DOMAIN",
+            "",
+        ),
+        help=(
+            "Freshservice HTTPS domain, "
+            "e.g. https://company.freshservice.com"
+        ),
     )
-    parser.add_argument("--console-url", default=os.environ.get("RAPID7_CONSOLE_URL", ""),
-                        help="Security Console HTTPS origin, e.g. https://console:3780")
-    parser.add_argument("--rapid7-console-username-secret", default=None)
-    parser.add_argument("--rapid7-console-password-secret", default=None)
-    parser.add_argument("--verbose", action="store_true")
+
+    parser.add_argument(
+        "--console-url",
+        default=os.environ.get(
+            "RAPID7_CONSOLE_URL",
+            "",
+        ),
+        help=(
+            "Security Console HTTPS origin, "
+            "e.g. https://console:3780"
+        ),
+    )
+
+    parser.add_argument(
+        "--rapid7-console-username-secret",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--rapid7-console-password-secret",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+    )
+
     return parser.parse_args()
 
 
-def build_secret_provider(args: argparse.Namespace) -> EnvSecretProvider | AzureKeyVaultSecretProvider:
+def build_secret_provider(
+    args: argparse.Namespace,
+) -> (
+    EnvSecretProvider
+    | AzureKeyVaultSecretProvider
+):
     if args.secret_source == "env":
         return EnvSecretProvider()
+
     if not args.azure_key_vault_url:
         raise SystemExit(
-            "--azure-key-vault-url or AZURE_KEY_VAULT_URL is required for Azure Key Vault"
+            "--azure-key-vault-url or AZURE_KEY_VAULT_URL "
+            "is required for Azure Key Vault"
         )
-    return AzureKeyVaultSecretProvider(args.azure_key_vault_url)
+
+    return AzureKeyVaultSecretProvider(
+        args.azure_key_vault_url
+    )
 
 
 def main() -> None:
     args = parse_args()
+
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        level=(
+            logging.DEBUG
+            if args.verbose
+            else logging.INFO
+        ),
+        format=(
+            "%(asctime)s %(levelname)s "
+            "%(name)s: %(message)s"
+        ),
     )
-    secrets = build_secret_provider(args)
+
+    secrets = build_secret_provider(
+        args
+    )
+
     if not args.console_url:
-        raise SystemExit("--console-url or RAPID7_CONSOLE_URL is required for Rapid7 API access")
+        raise SystemExit(
+            "--console-url or RAPID7_CONSOLE_URL "
+            "is required for Rapid7 API access"
+        )
+
     rapid7 = Rapid7Client(
         args.console_url,
-        secrets.get_required(args.rapid7_console_username_secret or default_secret_name(
-            args.secret_source, "RAPID7_CONSOLE_USERNAME", "rapid7-console-username")),
-        secrets.get_required(args.rapid7_console_password_secret or default_secret_name(
-            args.secret_source, "RAPID7_CONSOLE_PASSWORD", "rapid7-console-password")),
+        secrets.get_required(
+            args.rapid7_console_username_secret
+            or default_secret_name(
+                args.secret_source,
+                "RAPID7_CONSOLE_USERNAME",
+                "rapid7-console-username",
+            )
+        ),
+        secrets.get_required(
+            args.rapid7_console_password_secret
+            or default_secret_name(
+                args.secret_source,
+                "RAPID7_CONSOLE_PASSWORD",
+                "rapid7-console-password",
+            )
+        ),
         page_size=args.page_size,
         asset_group=args.asset_group,
     )
-    LOG.info("Downloading Rapid7 Critical and Severe vulnerability catalog")
-    catalog = build_catalog(rapid7.iter_vulnerability_catalog())
-    LOG.info("Catalog contains %s Critical/Severe vulnerability IDs", len(catalog))
 
-    LOG.info("Downloading affected Rapid7 assets and active findings")
-    findings, stats = transform_assets(
-        rapid7.iter_affected_assets(),
-        catalog,
-        hostname_fallback=args.hostname_fallback,
-        solution_lookup=rapid7.get_vulnerability_solutions,
-        proof_lookup=rapid7.get_asset_vulnerability_proof,
-    )
-    args.output = safe_output_path(args.output)
-    write_findings_csv(args.output, findings)
-    LOG.info("Wrote %s unique findings to %s", len(findings), args.output)
     LOG.info(
-        "Summary: assets=%s, no-host=%s, unknown-vulnerability-id=%s",
+        "Downloading in-scope Rapid7 assets and "
+        "active vulnerability IDs"
+    )
+
+    assets = list(
+        rapid7.iter_affected_assets()
+    )
+
+    vulnerability_ids = {
+        str(
+            item.get(
+                "vulnerability_id",
+                "",
+            )
+        ).strip()
+        for asset in assets
+        for field in (
+            "new",
+            "same",
+        )
+        for item in (
+            asset.get(field)
+            or []
+        )
+        if str(
+            item.get(
+                "vulnerability_id",
+                "",
+            )
+        ).strip()
+    }
+
+    LOG.info(
+        "Found %s in-scope assets with %s distinct "
+        "active vulnerability IDs",
+        len(assets),
+        len(vulnerability_ids),
+    )
+
+    LOG.info(
+        "Downloading catalog details only for "
+        "in-scope vulnerability IDs"
+    )
+
+    catalog = build_catalog(
+        rapid7.iter_vulnerabilities(
+            vulnerability_ids
+        )
+    )
+
+    LOG.info(
+        "Catalog contains %s qualifying Critical/Severe "
+        "non-Microsoft-Patch vulnerability IDs",
+        len(catalog),
+    )
+
+    LOG.info(
+        "Transforming affected Rapid7 assets and "
+        "active findings"
+    )
+
+    findings, stats = transform_assets(
+        assets,
+        catalog,
+        hostname_fallback=(
+            args.hostname_fallback
+        ),
+        solution_lookup=(
+            rapid7.get_vulnerability_solutions
+        ),
+        proof_lookup=(
+            rapid7.get_asset_vulnerability_proof
+        ),
+    )
+
+    args.output = safe_output_path(
+        args.output
+    )
+
+    write_findings_csv(
+        args.output,
+        findings,
+    )
+
+    LOG.info(
+        "Wrote %s unique findings to %s",
+        len(findings),
+        args.output,
+    )
+
+    LOG.info(
+        "Summary: assets=%s, no-host=%s, "
+        "unknown-vulnerability-id=%s",
         stats.assets_seen,
         stats.assets_without_host,
         stats.vulnerability_ids_not_in_catalog,
@@ -139,10 +374,14 @@ def main() -> None:
     if args.create_tickets:
         if not args.freshservice_domain:
             raise SystemExit(
-                "--freshservice-domain or FRESHSERVICE_DOMAIN is required to create tickets"
+                "--freshservice-domain or FRESHSERVICE_DOMAIN "
+                "is required to create tickets"
             )
+
         freshservice = FreshserviceClient(
-            domain=args.freshservice_domain,
+            domain=(
+                args.freshservice_domain
+            ),
             api_key=secrets.get_required(
                 args.freshservice_api_key_secret
                 or default_secret_name(
@@ -160,32 +399,68 @@ def main() -> None:
                 )
             ),
         )
+
         created = 0
         skipped = 0
+
         for finding in findings:
-            ticket = freshservice.create_ticket_if_missing(finding)
+            ticket = (
+                freshservice.create_ticket_if_missing(
+                    finding
+                )
+            )
+
             if ticket is None:
                 skipped += 1
+
                 LOG.info(
-                    "Skipping existing open Freshservice ticket for solution %s (%s)",
-                    finding.solution_id or finding.solution,
+                    "Skipping existing open Freshservice ticket "
+                    "for solution %s (%s)",
+                    (
+                        finding.solution_id
+                        or finding.solution
+                    ),
                     finding.solution,
                 )
+
             else:
                 created += 1
+
                 LOG.info(
-                    "Created Freshservice ticket id=%s for solution %s",
+                    "Created Freshservice ticket id=%s "
+                    "for solution %s",
                     ticket["id"],
-                    finding.solution_id or finding.solution,
+                    (
+                        finding.solution_id
+                        or finding.solution
+                    ),
                 )
-        LOG.info("Freshservice tickets: created=%s, already-open=%s", created, skipped)
+
+        LOG.info(
+            "Freshservice tickets: created=%s, "
+            "already-open=%s",
+            created,
+            skipped,
+        )
+
     else:
-        LOG.info("Dry run complete; use --create-tickets to create Freshservice tickets")
+        LOG.info(
+            "Dry run complete; use --create-tickets "
+            "to create Freshservice tickets"
+        )
 
     try:
-        mode = stat.S_IMODE(args.output.stat().st_mode)
+        mode = stat.S_IMODE(
+            args.output.stat().st_mode
+        )
+
         if mode & 0o077:
-            LOG.warning("%s is readable by group/other; consider chmod 600", args.output)
+            LOG.warning(
+                "%s is readable by group/other; "
+                "consider chmod 600",
+                args.output,
+            )
+
     except OSError:
         pass
 
