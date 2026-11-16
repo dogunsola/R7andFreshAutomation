@@ -38,8 +38,10 @@ jobs:
         displayName: Install dependencies
 
       - script: |
+          set -euo pipefail
           cd "patch automation"
-          python -m pytest
+          python3 --version
+          python3 -m pytest
         displayName: Run tests
 
       - script: |
