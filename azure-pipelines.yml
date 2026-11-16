@@ -12,7 +12,6 @@ schedules:
 variables:
   - group: "New version for automation"
 
-
 pool:
   name: "Security-Agent-Pool"
   demands:
@@ -21,6 +20,7 @@ pool:
 jobs:
   - job: sync
     displayName: Run Rapid7 to Freshservice sync
+
     steps:
       - checkout: self
 
@@ -28,27 +28,41 @@ jobs:
           set -euo pipefail
           cd "patch automation"
 
-          echo "Using:"
+          echo "System Python:"
           python3 --version
           which python3
 
+          echo "Creating virtual environment"
           python3 -m venv .venv
+
+          echo "Virtual environment Python:"
+          .venv/bin/python --version
+
+          echo "Upgrading pip"
           .venv/bin/python -m pip install --upgrade pip
+
+          echo "Installing project dependencies"
           .venv/bin/python -m pip install -e ".[dev,azure]"
+
+          echo "Installed pytest:"
+          .venv/bin/python -m pytest --version
         displayName: Install dependencies
 
       - script: |
           set -euo pipefail
           cd "patch automation"
-          python3 --version
-          python3 -m pytest
+
+          echo "Running tests with:"
+          .venv/bin/python --version
+
+          .venv/bin/python -m pytest
         displayName: Run tests
 
       - script: |
           set -euo pipefail
           cd "patch automation"
 
-          rapid7-freshservice-sync \
+          .venv/bin/rapid7-freshservice-sync \
             --secret-source env \
             --page-size 250 \
             --output "$(Build.ArtifactStagingDirectory)/rapid7-freshservice-findings.csv" \
