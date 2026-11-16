@@ -20,6 +20,7 @@ pool:
 jobs:
   - job: sync
     displayName: Run Rapid7 to Freshservice sync
+    timeoutInMinutes: 180
 
     steps:
       - checkout: self
