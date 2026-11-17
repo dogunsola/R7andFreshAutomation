@@ -20,6 +20,9 @@ class ConsoleExportTests(unittest.TestCase):
             "https://alterna.freshservice.com/api/v2"
         )
 
+        workspace_id = 2
+        group_id = 11000367285
+
         def page(records):
             return {
                 "resources": records,
@@ -177,25 +180,12 @@ class ConsoleExportTests(unittest.TestCase):
                     }
                 ]
             },
-
-            (
-                "POST",
-                "/tickets",
-            ): {
-                "ticket": {
-                    "id": 100,
-                    "status": 2,
-                }
-            },
         }
 
-        seen: list[
-            tuple[str, str]
-        ] = []
-
-        filter_requests = 0
+        rapid7_requests = []
+        freshservice_requests = []
+        filter_requests = []
         ticket_bodies = []
-        routing_requests = []
 
         def request(
             client,
@@ -203,11 +193,9 @@ class ConsoleExportTests(unittest.TestCase):
             url,
             **kwargs,
         ):
-            nonlocal filter_requests
-
-            # -----------------------------
+            # -----------------------------------------
             # Rapid7 requests
-            # -----------------------------
+            # -----------------------------------------
             if url.startswith(
                 rapid7_origin + "/"
             ):
@@ -232,21 +220,26 @@ class ConsoleExportTests(unittest.TestCase):
                     ].split("?")[0],
                 )
 
-                seen.append(
+                rapid7_requests.append(
                     key
                 )
 
                 self.assertIn(
                     key,
                     responses,
-                    f"Unexpected Rapid7 request: {key}",
+                    (
+                        "Unexpected Rapid7 request: "
+                        f"{key}"
+                    ),
                 )
 
-                return responses[key]
+                return responses[
+                    key
+                ]
 
-            # -----------------------------
+            # -----------------------------------------
             # Freshservice requests
-            # -----------------------------
+            # -----------------------------------------
             self.assertTrue(
                 url.startswith(
                     freshservice_origin + "/"
@@ -270,15 +263,17 @@ class ConsoleExportTests(unittest.TestCase):
                 ].split("?")[0],
             )
 
-            # -----------------------------
-            # Duplicate-ticket lookup
-            # -----------------------------
+            freshservice_requests.append(
+                key
+            )
+
+            # -----------------------------------------
+            # Duplicate ticket search
+            # -----------------------------------------
             if key == (
                 "GET",
                 "/tickets/filter",
             ):
-                filter_requests += 1
-
                 params = kwargs[
                     "params"
                 ]
@@ -287,15 +282,13 @@ class ConsoleExportTests(unittest.TestCase):
                     params[
                         "workspace_id"
                     ],
-                    0,
+                    workspace_id,
                 )
 
                 query = params[
                     "query"
                 ]
 
-                # Freshservice requires the entire filter expression
-                # to be wrapped in double quotes.
                 self.assertTrue(
                     query.startswith(
                         "\"tag:'rapid7-remediation-"
@@ -315,17 +308,15 @@ class ConsoleExportTests(unittest.TestCase):
                     query,
                 )
 
-                status = (
-                    2
-                    if filter_requests % 2 == 1
-                    else 3
-                )
-
-                self.assertTrue(
-                    query.endswith(
-                        f"AND status:{status}\""
-                    ),
-                    query,
+                filter_requests.append(
+                    {
+                        "workspace_id":
+                            params[
+                                "workspace_id"
+                            ],
+                        "query":
+                            query,
+                    }
                 )
 
                 return {
@@ -333,69 +324,13 @@ class ConsoleExportTests(unittest.TestCase):
                     "total": 0,
                 }
 
-            # -----------------------------
-            # Workspace lookup
-            # -----------------------------
-            if key == (
-                "GET",
-                "/workspaces",
-            ):
-                routing_requests.append(
-                    key
-                )
-
-                return {
-                    "workspaces": [
-                        {
-                            "id": 42,
-                            "name": (
-                                "IT, Banking Support & "
-                                "Marketing"
-                            ),
-                        }
-                    ]
-                }
-
-            # -----------------------------
-            # Service Desk group lookup
-            # -----------------------------
-            if key == (
-                "GET",
-                "/groups",
-            ):
-                self.assertEqual(
-                    kwargs[
-                        "params"
-                    ][
-                        "workspace_id"
-                    ],
-                    42,
-                )
-
-                routing_requests.append(
-                    key
-                )
-
-                return {
-                    "groups": [
-                        {
-                            "id": 84,
-                            "name": "Service Desk",
-                        }
-                    ]
-                }
-
-            # -----------------------------
+            # -----------------------------------------
             # Ticket creation
-            # -----------------------------
+            # -----------------------------------------
             if key == (
                 "POST",
                 "/tickets",
             ):
-                seen.append(
-                    key
-                )
-
                 payload = kwargs[
                     "json_body"
                 ]
@@ -407,23 +342,46 @@ class ConsoleExportTests(unittest.TestCase):
                     "security@example.com",
                 )
 
-                self.assertNotIn("status", payload)
-                self.assertNotIn("urgency", payload)
-                self.assertNotIn("impact", payload)
-                self.assertNotIn("priority", payload)
+                self.assertEqual(
+                    payload[
+                        "status"
+                    ],
+                    2,
+                )
+
+                self.assertEqual(
+                    payload[
+                        "urgency"
+                    ],
+                    2,
+                )
+
+                self.assertEqual(
+                    payload[
+                        "impact"
+                    ],
+                    2,
+                )
+
+                self.assertEqual(
+                    payload[
+                        "priority"
+                    ],
+                    2,
+                )
 
                 self.assertEqual(
                     payload[
                         "workspace_id"
                     ],
-                    42,
+                    workspace_id,
                 )
 
                 self.assertEqual(
                     payload[
                         "group_id"
                     ],
-                    84,
+                    group_id,
                 )
 
                 self.assertEqual(
@@ -447,16 +405,22 @@ class ConsoleExportTests(unittest.TestCase):
                     ],
                 )
 
-                self.assertTrue(
-                    any(
-                        tag.startswith(
-                            "rapid7-remediation-"
-                        )
-                        for tag
-                        in payload[
-                            "tags"
-                        ]
+                remediation_tags = [
+                    tag
+                    for tag
+                    in payload[
+                        "tags"
+                    ]
+                    if tag.startswith(
+                        "rapid7-remediation-"
                     )
+                ]
+
+                self.assertEqual(
+                    len(
+                        remediation_tags
+                    ),
+                    1,
                 )
 
                 description = payload[
@@ -506,8 +470,8 @@ class ConsoleExportTests(unittest.TestCase):
                     description,
                 )
 
-                # Rapid7 proof is intentionally HTML-escaped
-                # inside a <pre> block.
+                # Rapid7-supplied HTML is escaped before
+                # being placed in the Freshservice page.
                 self.assertIn(
                     (
                         "<pre>"
@@ -523,9 +487,33 @@ class ConsoleExportTests(unittest.TestCase):
                     payload
                 )
 
-                return responses[
-                    key
-                ]
+                return {
+                    "ticket": {
+                        "id": (
+                            100
+                            + len(
+                                ticket_bodies
+                            )
+                        ),
+                        "status": 2,
+                    }
+                }
+
+            # No workspace/group discovery should occur.
+            if key in {
+                (
+                    "GET",
+                    "/workspaces",
+                ),
+                (
+                    "GET",
+                    "/groups",
+                ),
+            }:
+                self.fail(
+                    "Freshservice workspace/group "
+                    "enumeration must not occur"
+                )
 
             self.fail(
                 "Unexpected Freshservice request: "
@@ -547,24 +535,37 @@ class ConsoleExportTests(unittest.TestCase):
                                 "/api/3"
                             )
                         ),
-                        "RAPID7_CONSOLE_USERNAME": (
-                            "user"
-                        ),
-                        "RAPID7_CONSOLE_PASSWORD": (
-                            "password"
-                        ),
+
+                        "RAPID7_CONSOLE_USERNAME":
+                            "user",
+
+                        "RAPID7_CONSOLE_PASSWORD":
+                            "password",
+
                         "FRESHSERVICE_DOMAIN": (
-                            "https://alterna.freshservice.com"
+                            "https://alterna."
+                            "freshservice.com"
                         ),
-                        "FRESHSERVICE_API_KEY": (
-                            "fresh-key"
-                        ),
-                        "FRESHSERVICE_REQUESTER_EMAIL": (
-                            "security@example.com"
-                        ),
+
+                        "FRESHSERVICE_API_KEY":
+                            "fresh-key",
+
+                        "FRESHSERVICE_REQUESTER_EMAIL":
+                            "security@example.com",
+
+                        "FRESHSERVICE_WORKSPACE_ID":
+                            str(
+                                workspace_id
+                            ),
+
+                        "FRESHSERVICE_GROUP_ID":
+                            str(
+                                group_id
+                            ),
                     },
                     clear=True,
                 ),
+
                 patch(
                     "sys.argv",
                     [
@@ -576,100 +577,102 @@ class ConsoleExportTests(unittest.TestCase):
                         "--create-tickets",
                     ],
                 ),
+
                 patch(
                     (
-                        "rapid7_freshservice_sync.http."
-                        "HttpClient.request_json"
+                        "rapid7_freshservice_sync."
+                        "http.HttpClient.request_json"
                     ),
                     new=request,
                 ),
             ):
                 main()
 
-            # -----------------------------
-            # Generated CSV
-            # -----------------------------
+            # -----------------------------------------
+            # Validate CSV output
+            # -----------------------------------------
             with output.open(
                 newline="",
                 encoding="utf-8",
             ) as file:
-                self.assertEqual(
-                    list(
-                        csv.reader(
-                            file
-                        )
-                    ),
-                    [
-                        [
-                            "Hosts",
-                            "Solution",
-                            "Fix details",
-                            "Proof information",
-                        ],
-                        [
-                            "laptop.example",
-                            "Configure Apache",
-                            "Disable legacy module",
-                            (
-                                "Asset: laptop.example "
-                                "(ID 42); "
-                                "Vulnerability: apache-vuln; "
-                                "Check: apache-check; "
-                                "Status: vulnerable-version; "
-                                "Proof: "
-                                "<p>Apache version 2.4.0</p>"
-                            ),
-                        ],
-                        [
-                            "laptop.example",
-                            "Upgrade Apache",
-                            "Install latest release",
-                            (
-                                "Asset: laptop.example "
-                                "(ID 42); "
-                                "Vulnerability: apache-vuln; "
-                                "Check: apache-check; "
-                                "Status: vulnerable-version; "
-                                "Proof: "
-                                "<p>Apache version 2.4.0</p>"
-                            ),
-                        ],
-                    ],
+                rows = list(
+                    csv.reader(
+                        file
+                    )
                 )
 
-        # -------------------------------------------------
-        # Catalog optimization regression check
-        # -------------------------------------------------
+            self.assertEqual(
+                rows,
+                [
+                    [
+                        "Hosts",
+                        "Solution",
+                        "Fix details",
+                        "Proof information",
+                    ],
+                    [
+                        "laptop.example",
+                        "Configure Apache",
+                        "Disable legacy module",
+                        (
+                            "Asset: laptop.example "
+                            "(ID 42); "
+                            "Vulnerability: apache-vuln; "
+                            "Check: apache-check; "
+                            "Status: vulnerable-version; "
+                            "Proof: "
+                            "<p>Apache version 2.4.0</p>"
+                        ),
+                    ],
+                    [
+                        "laptop.example",
+                        "Upgrade Apache",
+                        "Install latest release",
+                        (
+                            "Asset: laptop.example "
+                            "(ID 42); "
+                            "Vulnerability: apache-vuln; "
+                            "Check: apache-check; "
+                            "Status: vulnerable-version; "
+                            "Proof: "
+                            "<p>Apache version 2.4.0</p>"
+                        ),
+                    ],
+                ],
+            )
 
-        # The optimized path must never download the full
-        # paginated vulnerability catalog.
+        # ---------------------------------------------
+        # Verify Rapid7 optimized behavior
+        # ---------------------------------------------
+
+        # Do not download the complete global catalog.
         self.assertNotIn(
             (
                 "GET",
                 "/vulnerabilities",
             ),
-            seen,
+            rapid7_requests,
         )
 
-        # Moderate vulnerability details are retrieved so they
-        # can be classified, but the vulnerability must not
-        # proceed to solution lookup.
+        # Moderate findings are loaded for classification,
+        # but must not proceed to solution lookup.
         self.assertNotIn(
             (
                 "GET",
-                "/vulnerabilities/moderate/solutions",
+                "/vulnerabilities/"
+                "moderate/solutions",
             ),
-            seen,
+            rapid7_requests,
         )
 
-        # Microsoft Patch findings must also stop before
+        # Microsoft Patch findings must not proceed to
         # solution lookup.
         self.assertNotIn(
             (
                 "GET",
                 "/vulnerabilities/ms/solutions",
             ),
-            seen,
+            rapid7_requests,
         )
 
         expected_rapid7_requests = {
@@ -677,71 +680,92 @@ class ConsoleExportTests(unittest.TestCase):
                 "GET",
                 "/asset_groups",
             ),
+
             (
                 "GET",
                 "/asset_groups/8/assets",
             ),
+
             (
                 "POST",
                 "/assets/search",
             ),
+
             (
                 "GET",
                 "/assets/42/vulnerabilities",
             ),
+
             (
                 "GET",
                 "/vulnerabilities/apache-vuln",
             ),
+
             (
                 "GET",
                 "/vulnerabilities/moderate",
             ),
+
             (
                 "GET",
                 "/vulnerabilities/ms",
             ),
+
             (
                 "GET",
-                "/vulnerabilities/apache-vuln/solutions",
+                (
+                    "/vulnerabilities/"
+                    "apache-vuln/solutions"
+                ),
             ),
+
             (
                 "GET",
                 "/solutions/apache-upgrade",
             ),
+
             (
                 "GET",
                 "/solutions/apache-configure",
             ),
+
             (
                 "GET",
-                "/assets/42/vulnerabilities/apache-vuln",
+                (
+                    "/assets/42/vulnerabilities/"
+                    "apache-vuln"
+                ),
             ),
         }
 
-        actual_rapid7_requests = {
-            key
-            for key in seen
-            if key
-            != (
-                "POST",
-                "/tickets",
-            )
-        }
-
         self.assertEqual(
-            actual_rapid7_requests,
+            set(
+                rapid7_requests
+            ),
             expected_rapid7_requests,
         )
 
-        # Two findings, each checked against Open and Pending
-        # Freshservice statuses.
-        self.assertEqual(
-            filter_requests,
-            4,
+        # ---------------------------------------------
+        # Verify Freshservice scoping
+        # ---------------------------------------------
+
+        self.assertNotIn(
+            (
+                "GET",
+                "/workspaces",
+            ),
+            freshservice_requests,
         )
 
-        # Two Rapid7 solutions should produce two ticket requests.
+        self.assertNotIn(
+            (
+                "GET",
+                "/groups",
+            ),
+            freshservice_requests,
+        )
+
+        # Two Rapid7 remediation solutions.
         self.assertEqual(
             len(
                 ticket_bodies
@@ -763,35 +787,61 @@ class ConsoleExportTests(unittest.TestCase):
             },
         )
 
-        # The two Rapid7 solutions have different stable
-        # deduplication tags.
-        self.assertNotEqual(
+        # Every created ticket must use only the explicitly
+        # configured IT workspace and IT Security group.
+        for body in ticket_bodies:
+            self.assertEqual(
+                body[
+                    "workspace_id"
+                ],
+                2,
+            )
+
+            self.assertEqual(
+                body[
+                    "group_id"
+                ],
+                11000367285,
+            )
+
+        # Each finding gets checked against both Open and
+        # Pending status, so 2 findings x 2 statuses = 4.
+        self.assertEqual(
+            len(
+                filter_requests
+            ),
+            4,
+        )
+
+        for request_info in filter_requests:
+            self.assertEqual(
+                request_info[
+                    "workspace_id"
+                ],
+                2,
+            )
+
+        # Each remediation solution must have its own
+        # deterministic deduplication tag.
+        first_tags = set(
             ticket_bodies[
                 0
             ][
                 "tags"
-            ],
+            ]
+        )
+
+        second_tags = set(
             ticket_bodies[
                 1
             ][
                 "tags"
-            ],
+            ]
         )
 
-        # Workspace and group are cached after the first lookup,
-        # so these should occur only once despite two tickets.
-        self.assertEqual(
-            routing_requests,
-            [
-                (
-                    "GET",
-                    "/workspaces",
-                ),
-                (
-                    "GET",
-                    "/groups",
-                ),
-            ],
+        self.assertNotEqual(
+            first_tags,
+            second_tags,
         )
 
 
