@@ -49,7 +49,8 @@ class FreshserviceClient:
 
         if not hostname.endswith(".freshservice.com"):
             raise ValueError(
-                "Freshservice hostname must end with .freshservice.com"
+                "Freshservice hostname must end with "
+                ".freshservice.com"
             )
 
         if parsed.username or parsed.password:
@@ -59,8 +60,8 @@ class FreshserviceClient:
 
         if parsed.path not in ("", "/"):
             raise ValueError(
-                "Freshservice domain must contain only the HTTPS "
-                "origin and must not include a path"
+                "Freshservice domain must contain only the "
+                "HTTPS origin and must not include a path"
             )
 
         if (
@@ -69,7 +70,8 @@ class FreshserviceClient:
             or parsed.fragment
         ):
             raise ValueError(
-                "Freshservice domain must contain only the HTTPS origin"
+                "Freshservice domain must contain only the "
+                "HTTPS origin"
             )
 
         if not api_key.strip():
@@ -115,14 +117,12 @@ class FreshserviceClient:
         finding: Finding,
     ) -> dict[str, Any] | None:
         """
-        Create a Freshservice ticket unless a matching Open or
-        Pending ticket already exists.
+        Create a Freshservice ticket unless an Open or Pending
+        ticket with the same stable remediation tag already exists.
 
-        The complete Freshservice filter expression must be enclosed
-        in double quotes. String values inside the expression use
-        single quotes.
-
-        workspace_id=0 searches across all accessible workspaces.
+        Freshservice requires the complete ticket filter expression
+        to be enclosed in double quotes. workspace_id=0 searches all
+        accessible workspaces.
         """
 
         tag = finding_tag(finding)
@@ -348,11 +348,10 @@ def finding_tag(
     finding: Finding,
 ) -> str:
     """
-    Build a stable tag for Freshservice duplicate detection.
+    Return a stable Freshservice tag for the remediation.
 
-    When a Rapid7 solution ID is available, it is included in
-    the identity. Otherwise the solution text and fix details
-    become the identity.
+    A Rapid7 solution ID takes precedence when available. Catalog
+    fallback findings use solution text and fix details instead.
     """
 
     if finding.solution_id:
@@ -393,9 +392,9 @@ def _ticket_description(
     finding: Finding,
 ) -> str:
     """
-    Build the Freshservice HTML ticket description.
+    Build the Freshservice HTML description.
 
-    Rapid7-provided data is HTML-escaped before insertion.
+    All Rapid7-supplied values are HTML-escaped before insertion.
     """
 
     assets = (
@@ -410,12 +409,12 @@ def _ticket_description(
         )
     )
 
-    asset_rows = "".join(n(
+    asset_rows = "".join(
         (
             "<tr>"
             f"<td>{html.escape(asset.asset_id)}</td>"
             f"<td>{html.escape(asset.host)}</td>"
-          f"<td>{html.escape(asset.ip)}</td>"
+            f"<td>{html.escape(asset.ip)}</td>"
             f"<td>{html.escape(finding.solution_id)}</td>"
             f"<td>{html.escape(finding.solution)}</td>"
             f"<td>{html.escape(finding.fix_details)}</td>"
