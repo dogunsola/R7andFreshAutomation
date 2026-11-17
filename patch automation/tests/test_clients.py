@@ -11,10 +11,362 @@ from rapid7_freshservice_sync.http import (
     HttpClient,
 )
 from rapid7_freshservice_sync.models import Finding
+from rapid7_freshservice_sync.rapid7 import Rapid7Client
 
 
-class FreshserviceClientTests(unittest.TestCase):
-    def test_creates_ticket_using_configured_workspace_and_group(
+class ClientTests(unittest.TestCase):
+    def test_console_assets_pagination_membership_and_active_findings(
+        self,
+    ) -> None:
+        def page(
+            resources,
+            total=1,
+        ):
+            return {
+                "resources": resources,
+                "page": {
+                    "totalPages": total,
+                },
+            }
+
+        http = Mock()
+
+        http.request_json.side_effect = [
+            page(
+                [
+                    {
+                        "id": 1,
+                        "name":
+                            "other workstations/laptops",
+                    }
+                ],
+                2,
+            ),
+            page(
+                [
+                    {
+                        "id": 2,
+                        "name":
+                            "workstations/laptops",
+                    }
+                ],
+                2,
+            ),
+            {
+                "resources": [
+                    10,
+                    20,
+                ]
+            },
+            page(
+                [
+                    {
+                        "id": 99,
+                    },
+                    {
+                        "id": 10,
+                        "hostName": "host-a",
+                        "ip": "10.0.0.1",
+                    },
+                ],
+                2,
+            ),
+            page(
+                [
+                    {
+                        "id": "v1",
+                        "status": "vulnerable",
+                    }
+                ],
+                2,
+            ),
+            page(
+                [
+                    {
+                        "id": "v2",
+                        "status": "invulnerable",
+                    },
+                    {
+                        "id": "v3",
+                        "status": "no-results",
+                    },
+                ],
+                2,
+            ),
+            page(
+                [
+                    {
+                        "id": 20,
+                        "ip": "10.0.0.2",
+                    }
+                ],
+                2,
+            ),
+            page(
+                [
+                    {
+                        "id": "v4",
+                        "status": "vulnerable",
+                    }
+                ]
+            ),
+        ]
+
+        client = Rapid7Client(
+            "https://console.example:3780",
+            "user",
+            "password",
+            http=http,
+            page_size=100,
+        )
+
+        self.assertEqual(
+            list(
+                client.iter_affected_assets()
+            ),
+            [
+                {
+                    "id": 10,
+                    "host_name": "host-a",
+                    "ip": "10.0.0.1",
+                    "new": [
+                        {
+                            "vulnerability_id": "v1",
+                        }
+                    ],
+                },
+                {
+                    "id": 20,
+                    "host_name": "",
+                    "ip": "10.0.0.2",
+                    "new": [
+                        {
+                            "vulnerability_id": "v4",
+                        }
+                    ],
+                },
+            ],
+        )
+
+        calls = http.request_json.call_args_list
+
+        self.assertTrue(
+            all(
+                call.args[1].startswith(
+                    "https://console.example:3780/api/3/"
+                )
+                for call in calls
+            )
+        )
+
+        self.assertEqual(
+            calls[1].kwargs[
+                "params"
+            ][
+                "page"
+            ],
+            1,
+        )
+
+        self.assertEqual(
+            calls[2].args[1],
+            (
+                "https://console.example:3780/api/3/"
+                "asset_groups/2/assets"
+            ),
+        )
+
+        self.assertEqual(
+            calls[3].args[0],
+            "POST",
+        )
+
+        self.assertEqual(
+            calls[3].kwargs[
+                "json_body"
+            ],
+            {
+                "match": "all",
+                "filters": [
+                    {
+                        "field": "last-scan-date",
+                        "operator":
+                            "is-within-the-last",
+                        "value": 7,
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(
+            calls[5].kwargs[
+                "params"
+            ][
+                "page"
+            ],
+            1,
+        )
+
+        self.assertEqual(
+            calls[6].kwargs[
+                "params"
+            ][
+                "page"
+            ],
+            1,
+        )
+
+    def test_console_catalog_filters_severity_and_category(
+        self,
+    ) -> None:
+        http = Mock()
+
+        http.request_json.side_effect = [
+            {
+                "resources": [
+                    {
+                        "id": "a",
+                        "severity": "Critical",
+                    },
+                    {
+                        "id": "b",
+                        "severity": "Moderate",
+                    },
+                ],
+                "page": {
+                    "totalPages": 2,
+                },
+            },
+            {
+                "resources": [
+                    {
+                        "id": "c",
+                        "severity": "Severe",
+                        "categories": [
+                            "Microsoft Patch",
+                        ],
+                    },
+                    {
+                        "id": "d",
+                        "severity": "Severe",
+                        "categories": [
+                            "Apache",
+                        ],
+                    },
+                ],
+                "page": {
+                    "totalPages": 2,
+                },
+            },
+        ]
+
+        client = Rapid7Client(
+            "https://console:3780",
+            "user",
+            "password",
+            http=http,
+        )
+
+        self.assertEqual(
+            [
+                vulnerability[
+                    "id"
+                ]
+                for vulnerability
+                in client.iter_vulnerability_catalog()
+            ],
+            [
+                "a",
+                "d",
+            ],
+        )
+
+        self.assertEqual(
+            http.request_json.call_args.args,
+            (
+                "GET",
+                (
+                    "https://console:3780/api/3/"
+                    "vulnerabilities"
+                ),
+            ),
+        )
+
+    def test_missing_group_fails_without_broadening_scope(
+        self,
+    ) -> None:
+        http = Mock()
+
+        http.request_json.return_value = {
+            "resources": [],
+            "page": {
+                "totalPages": 0,
+            },
+        }
+
+        client = Rapid7Client(
+            "https://console:3780",
+            "user",
+            "password",
+            http=http,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "exactly one",
+        ):
+            list(
+                client.iter_affected_assets()
+            )
+
+        self.assertEqual(
+            http.request_json.call_count,
+            1,
+        )
+
+    def test_empty_group_has_no_assets(
+        self,
+    ) -> None:
+        http = Mock()
+
+        http.request_json.side_effect = [
+            {
+                "resources": [
+                    {
+                        "id": 2,
+                        "name":
+                            "workstations/laptops",
+                    }
+                ],
+                "page": {
+                    "totalPages": 1,
+                },
+            },
+            {
+                "resources": [],
+            },
+        ]
+
+        client = Rapid7Client(
+            "https://console:3780",
+            "user",
+            "password",
+            http=http,
+        )
+
+        self.assertEqual(
+            list(
+                client.iter_affected_assets()
+            ),
+            [],
+        )
+
+        self.assertEqual(
+            http.request_json.call_count,
+            2,
+        )
+
+    def test_freshservice_creates_tagged_ticket_when_no_open_duplicate_exists(
         self,
     ) -> None:
         http = Mock()
@@ -52,8 +404,10 @@ class FreshserviceClientTests(unittest.TestCase):
             "Install 2.0",
         )
 
-        result = client.create_ticket_if_missing(
-            finding
+        result = (
+            client.create_ticket_if_missing(
+                finding
+            )
         )
 
         self.assertEqual(
@@ -205,7 +559,28 @@ class FreshserviceClientTests(unittest.TestCase):
             ]
         )
 
-    def test_skips_matching_open_ticket(
+        requested_urls = {
+            call.args[1]
+            for call in calls
+        }
+
+        self.assertNotIn(
+            (
+                "https://alterna.freshservice.com/"
+                "api/v2/workspaces"
+            ),
+            requested_urls,
+        )
+
+        self.assertNotIn(
+            (
+                "https://alterna.freshservice.com/"
+                "api/v2/groups"
+            ),
+            requested_urls,
+        )
+
+    def test_freshservice_skips_matching_open_ticket(
         self,
     ) -> None:
         http = Mock()
@@ -248,7 +623,20 @@ class FreshserviceClientTests(unittest.TestCase):
             1,
         )
 
-    def test_ticket_description_omits_proof_above_threshold(
+        self.assertEqual(
+            http.request_json.call_args.kwargs[
+                "params"
+            ],
+            {
+                "workspace_id": 2,
+                "query": (
+                    f"\"tag:'{finding_tag(finding)}' "
+                    "AND status:2\""
+                ),
+            },
+        )
+
+    def test_ticket_description_omits_proof_section_above_threshold(
         self,
     ) -> None:
         description = _ticket_description(
@@ -280,7 +668,7 @@ class FreshserviceClientTests(unittest.TestCase):
             description,
         )
 
-    def test_configuration_is_validated(
+    def test_freshservice_configuration_is_validated(
         self,
     ) -> None:
         client = FreshserviceClient(
@@ -349,6 +737,35 @@ class FreshserviceClientTests(unittest.TestCase):
                     "security@example.com",
                     workspace_id=2,
                     group_id=invalid_group_id,
+                )
+
+        for domain in (
+            "http://alterna.freshservice.com",
+            (
+                "https://alterna.freshservice.com"
+                ".evil.test"
+            ),
+            "https://custom.example.com",
+            "https://support.alterna.ca",
+            (
+                "https://alterna.freshservice.com/"
+                "api/v2"
+            ),
+        ):
+            with (
+                self.subTest(
+                    domain=domain
+                ),
+                self.assertRaises(
+                    ValueError
+                ),
+            ):
+                FreshserviceClient(
+                    domain,
+                    "api-key",
+                    "security@example.com",
+                    workspace_id=2,
+                    group_id=11000367285,
                 )
 
     def test_http_client_rejects_unexpected_urls(
