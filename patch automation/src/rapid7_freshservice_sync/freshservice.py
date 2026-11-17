@@ -33,10 +33,7 @@ class FreshserviceClient:
         http: HttpClient | None = None,
     ) -> None:
         normalized_domain = domain.strip().rstrip("/")
-
-        parsed = urlparse(
-            normalized_domain
-        )
+        parsed = urlparse(normalized_domain)
 
         if parsed.scheme != "https":
             raise ValueError(
@@ -50,26 +47,20 @@ class FreshserviceClient:
 
         hostname = parsed.hostname.lower()
 
-        if not hostname.endswith(
-            ".freshservice.com"
-        ):
+        if not hostname.endswith(".freshservice.com"):
             raise ValueError(
-                "Freshservice hostname must end with "
-                ".freshservice.com"
+                "Freshservice hostname must end with .freshservice.com"
             )
 
-        if (
-            parsed.username
-            or parsed.password
-        ):
+        if parsed.username or parsed.password:
             raise ValueError(
                 "Freshservice domain must not contain credentials"
             )
 
         if parsed.path not in ("", "/"):
             raise ValueError(
-                "Freshservice domain must contain only the "
-                "HTTPS origin and must not include a path"
+                "Freshservice domain must contain only the HTTPS "
+                "origin and must not include a path"
             )
 
         if (
@@ -78,8 +69,7 @@ class FreshserviceClient:
             or parsed.fragment
         ):
             raise ValueError(
-                "Freshservice domain must contain only the "
-                "HTTPS origin"
+                "Freshservice domain must contain only the HTTPS origin"
             )
 
         if not api_key.strip():
@@ -102,18 +92,14 @@ class FreshserviceClient:
 
         token = base64.b64encode(
             f"{api_key.strip()}:X".encode()
-        ).decode(
-            "ascii"
-        )
+        ).decode("ascii")
 
         self.http = (
             http
             or HttpClient(
                 headers={
-                    "Authorization":
-                        f"Basic {token}",
-                    "Accept":
-                        "application/json",
+                    "Authorization": f"Basic {token}",
+                    "Accept": "application/json",
                 },
                 allowed_hosts={
                     hostname,
@@ -128,37 +114,41 @@ class FreshserviceClient:
         self,
         finding: Finding,
     ) -> dict[str, Any] | None:
-        tag = finding_tag(
-            finding
-        )
+        """
+        Create a Freshservice ticket unless a matching Open or
+        Pending ticket already exists.
 
-        # Check both Open and Pending tickets before creating
-        # another ticket for the same Rapid7 remediation.
+        The complete Freshservice filter expression must be enclosed
+        in double quotes. String values inside the expression use
+        single quotes.
+
+        workspace_id=0 searches across all accessible workspaces.
+        """
+
+        tag = finding_tag(finding)
+
         for status in OPEN_STATUSES:
+            query = (
+                f"\"tag:'{tag}' "
+                f"AND status:{status}\""
+            )
+
             response = self.http.request_json(
                 "GET",
                 f"{self.base_url}/tickets/filter",
                 params={
-                    "query": (
-                        f"tag: '{tag}' "
-                        f"AND status:{status}"
-                    )
+                    "workspace_id": 0,
+                    "query": query,
                 },
             )
 
             tickets = (
                 response.get("tickets")
-                if isinstance(
-                    response,
-                    dict,
-                )
+                if isinstance(response, dict)
                 else None
             )
 
-            if not isinstance(
-                tickets,
-                list,
-            ):
+            if not isinstance(tickets, list):
                 raise ApiError(
                     "Freshservice ticket filter returned "
                     "an invalid response"
@@ -172,43 +162,21 @@ class FreshserviceClient:
         )
 
         payload = {
-            "email":
-                self.requester_email,
-
-            "subject":
-                _ticket_subject(
-                    finding.solution
-                ),
-
-            "description":
-                _ticket_description(
-                    finding
-                ),
-
-            "urgency":
-                MEDIUM,
-
-            "impact":
-                MEDIUM,
-
-            "priority":
-                MEDIUM,
-
-            "status":
-                2,
-
-            "workspace_id":
-                workspace_id,
-
-            "group_id":
-                group_id,
-
-            "category":
-                TICKET_CATEGORY,
-
-            "sub_category":
-                TICKET_SUB_CATEGORY,
-
+            "email": self.requester_email,
+            "subject": _ticket_subject(
+                finding.solution
+            ),
+            "description": _ticket_description(
+                finding
+            ),
+            "urgency": MEDIUM,
+            "impact": MEDIUM,
+            "priority": MEDIUM,
+            "status": 2,
+            "workspace_id": workspace_id,
+            "group_id": group_id,
+            "category": TICKET_CATEGORY,
+            "sub_category": TICKET_SUB_CATEGORY,
             "tags": [
                 "rapid7-insightvm",
                 tag,
@@ -224,18 +192,12 @@ class FreshserviceClient:
 
         ticket = (
             response.get("ticket")
-            if isinstance(
-                response,
-                dict,
-            )
+            if isinstance(response, dict)
             else None
         )
 
         if (
-            not isinstance(
-                ticket,
-                dict,
-            )
+            not isinstance(ticket, dict)
             or "id" not in ticket
         ):
             raise ApiError(
@@ -292,8 +254,7 @@ class FreshserviceClient:
         matches = [
             resource
             for resource in resources
-            if resource.get("name")
-            == name
+            if resource.get("name") == name
         ]
 
         if len(matches) != 1:
@@ -303,52 +264,34 @@ class FreshserviceClient:
                 f"{name!r}; found {len(matches)}"
             )
 
-        resource_id = matches[
-            0
-        ].get(
-            "id"
-        )
+        resource_id = matches[0].get("id")
 
         if (
-            isinstance(
-                resource_id,
-                bool,
-            )
+            isinstance(resource_id, bool)
             or not isinstance(
                 resource_id,
-                (
-                    int,
-                    str,
-                ),
+                (int, str),
             )
         ):
             raise ApiError(
-                "Freshservice "
-                f"{resource_key[:-1]} "
+                f"Freshservice {resource_key[:-1]} "
                 f"{name!r} has an invalid ID"
             )
 
         if (
-            isinstance(
-                resource_id,
-                str,
-            )
+            isinstance(resource_id, str)
             and not resource_id.isdecimal()
         ):
             raise ApiError(
-                "Freshservice "
-                f"{resource_key[:-1]} "
+                f"Freshservice {resource_key[:-1]} "
                 f"{name!r} has an invalid ID"
             )
 
-        parsed_id = int(
-            resource_id
-        )
+        parsed_id = int(resource_id)
 
         if parsed_id <= 0:
             raise ApiError(
-                "Freshservice "
-                f"{resource_key[:-1]} "
+                f"Freshservice {resource_key[:-1]} "
                 f"{name!r} has an invalid ID"
             )
 
@@ -362,65 +305,40 @@ class FreshserviceClient:
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         page = 1
-
-        resources: list[
-            dict[str, Any]
-        ] = []
+        resources: list[dict[str, Any]] = []
 
         while True:
             response = self.http.request_json(
                 "GET",
                 f"{self.base_url}{path}",
                 params={
-                    **(
-                        params
-                        or {}
-                    ),
-                    "page":
-                        page,
-                    "per_page":
-                        RESOURCE_PAGE_SIZE,
+                    **(params or {}),
+                    "page": page,
+                    "per_page": RESOURCE_PAGE_SIZE,
                 },
             )
 
             batch = (
-                response.get(
-                    resource_key
-                )
-                if isinstance(
-                    response,
-                    dict,
-                )
+                response.get(resource_key)
+                if isinstance(response, dict)
                 else None
             )
 
             if (
-                not isinstance(
-                    batch,
-                    list,
-                )
+                not isinstance(batch, list)
                 or any(
-                    not isinstance(
-                        resource,
-                        dict,
-                    )
+                    not isinstance(resource, dict)
                     for resource in batch
                 )
             ):
                 raise ApiError(
-                    "Freshservice "
-                    f"{resource_key} list returned "
-                    "an invalid response"
+                    f"Freshservice {resource_key} list "
+                    "returned an invalid response"
                 )
 
-            resources.extend(
-                batch
-            )
+            resources.extend(batch)
 
-            if (
-                len(batch)
-                < RESOURCE_PAGE_SIZE
-            ):
+            if len(batch) < RESOURCE_PAGE_SIZE:
                 return resources
 
             page += 1
@@ -430,8 +348,11 @@ def finding_tag(
     finding: Finding,
 ) -> str:
     """
-    Build a stable tag used to prevent duplicate open
-    Freshservice tickets for the same Rapid7 remediation.
+    Build a stable tag for Freshservice duplicate detection.
+
+    When a Rapid7 solution ID is available, it is included in
+    the identity. Otherwise the solution text and fix details
+    become the identity.
     """
 
     if finding.solution_id:
@@ -442,7 +363,6 @@ def finding_tag(
             "\0"
             f"{finding.fix_details}"
         )
-
     else:
         identity = (
             f"{finding.solution}"
@@ -451,9 +371,7 @@ def finding_tag(
         )
 
     stable_id = hashlib.sha256(
-        identity.encode(
-            "utf-8"
-        )
+        identity.encode("utf-8")
     ).hexdigest()[:24]
 
     return (
@@ -475,10 +393,9 @@ def _ticket_description(
     finding: Finding,
 ) -> str:
     """
-    Build the Freshservice HTML description.
+    Build the Freshservice HTML ticket description.
 
-    Rapid7-controlled values are HTML-escaped before being
-    embedded in the ticket.
+    Rapid7-provided data is HTML-escaped before insertion.
     """
 
     assets = (
@@ -489,17 +406,16 @@ def _ticket_description(
                 host=host,
                 ip="",
             )
-            for host
-            in finding.hosts
+            for host in finding.hosts
         )
     )
 
-    asset_rows = "".join(
+    asset_rows = "".join(n(
         (
             "<tr>"
             f"<td>{html.escape(asset.asset_id)}</td>"
             f"<td>{html.escape(asset.host)}</td>"
-            f"<td>{html.escape(asset.ip)}</td>"
+          f"<td>{html.escape(asset.ip)}</td>"
             f"<td>{html.escape(finding.solution_id)}</td>"
             f"<td>{html.escape(finding.solution)}</td>"
             f"<td>{html.escape(finding.fix_details)}</td>"
@@ -549,8 +465,7 @@ def _ticket_description(
                     "</pre></td>"
                     "</tr>"
                 )
-                for proof
-                in finding.proofs
+                for proof in finding.proofs
             )
 
             proof_content = (
