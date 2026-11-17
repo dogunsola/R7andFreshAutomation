@@ -322,7 +322,6 @@ class ConsoleExportTests(unittest.TestCase):
                     "security@example.com",
                 )
 
-                # Required by Freshservice.
                 self.assertEqual(
                     payload[
                         "status"
@@ -337,7 +336,6 @@ class ConsoleExportTests(unittest.TestCase):
                     2,
                 )
 
-                # Deliberately left to Freshservice.
                 self.assertNotIn(
                     "urgency",
                     payload,
