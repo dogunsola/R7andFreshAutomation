@@ -1,9 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from rapid7_freshservice_sync.rapid7 import (
-    Rapid7SolutionClient,
-)
+from rapid7_freshservice_sync.rapid7 import Rapid7SolutionClient
 from rapid7_freshservice_sync.transform import (
     build_catalog,
     transform_assets,
@@ -11,9 +9,7 @@ from rapid7_freshservice_sync.transform import (
 
 
 class SolutionTests(unittest.TestCase):
-    def test_solution_lookup_and_caching(
-        self,
-    ) -> None:
+    def test_solution_lookup_and_caching(self) -> None:
         http = Mock()
 
         record = {
@@ -99,6 +95,15 @@ class SolutionTests(unittest.TestCase):
 
         self.assertEqual(
             http.request_json.call_args_list[
+                0
+            ].kwargs,
+            {
+                "timeout": 300,
+            },
+        )
+
+        self.assertEqual(
+            http.request_json.call_args_list[
                 1
             ].args,
             (
@@ -108,6 +113,15 @@ class SolutionTests(unittest.TestCase):
                     "solutions/fix%2Fid"
                 ),
             ),
+        )
+
+        self.assertEqual(
+            http.request_json.call_args_list[
+                1
+            ].kwargs,
+            {
+                "timeout": 300,
+            },
         )
 
     def test_solution_lookup_missing_resources_returns_empty_and_caches(
@@ -133,6 +147,7 @@ class SolutionTests(unittest.TestCase):
             [],
         )
 
+        # Empty response is cached.
         self.assertEqual(
             client.get_vulnerability_solutions(
                 "no-solution"
@@ -152,6 +167,7 @@ class SolutionTests(unittest.TestCase):
                 "vulnerabilities/"
                 "no-solution/solutions"
             ),
+            timeout=300,
         )
 
     def test_vulnerability_detail_lookup_and_caching(
@@ -264,17 +280,25 @@ class SolutionTests(unittest.TestCase):
             ],
         )
 
-        # The duplicate critical ID is requested only once.
         self.assertEqual(
             http.request_json.call_count,
             3,
         )
 
+        for call in (
+            http.request_json.call_args_list
+        ):
+            self.assertEqual(
+                call.kwargs[
+                    "timeout"
+                ],
+                300,
+            )
+
         requested_urls = {
             call.args[1]
-            for call in (
-                http.request_json.call_args_list
-            )
+            for call
+            in http.request_json.call_args_list
         }
 
         self.assertEqual(
@@ -355,6 +379,7 @@ class SolutionTests(unittest.TestCase):
                 "assets/asset%2Fid/"
                 "vulnerabilities/vuln%2Fid"
             ),
+            timeout=300,
         )
 
     def test_console_url_and_auth(
@@ -487,7 +512,9 @@ class SolutionTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            len(fallback_findings),
+            len(
+                fallback_findings
+            ),
             1,
         )
 
