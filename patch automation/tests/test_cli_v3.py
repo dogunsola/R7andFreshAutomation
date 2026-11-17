@@ -17,7 +17,7 @@ class ConsoleExportTests(unittest.TestCase):
         )
 
         freshservice_origin = (
-            "https://example.freshservice.com/api/v2"
+            "https://alterna.freshservice.com/api/v2"
         )
 
         def page(records):
@@ -40,6 +40,7 @@ class ConsoleExportTests(unittest.TestCase):
                     }
                 ]
             ),
+
             (
                 "GET",
                 "/asset_groups/8/assets",
@@ -48,6 +49,7 @@ class ConsoleExportTests(unittest.TestCase):
                     42,
                 ]
             },
+
             (
                 "POST",
                 "/assets/search",
@@ -60,6 +62,7 @@ class ConsoleExportTests(unittest.TestCase):
                     }
                 ]
             ),
+
             (
                 "GET",
                 "/assets/42/vulnerabilities",
@@ -83,6 +86,7 @@ class ConsoleExportTests(unittest.TestCase):
                     },
                 ]
             ),
+
             (
                 "GET",
                 "/vulnerabilities/apache-vuln",
@@ -96,6 +100,7 @@ class ConsoleExportTests(unittest.TestCase):
                 "solution": "Upgrade Apache",
                 "fix": "Install latest release",
             },
+
             (
                 "GET",
                 "/vulnerabilities/moderate",
@@ -109,6 +114,7 @@ class ConsoleExportTests(unittest.TestCase):
                 "solution": "Upgrade Apache",
                 "fix": "Install latest release",
             },
+
             (
                 "GET",
                 "/vulnerabilities/ms",
@@ -122,6 +128,7 @@ class ConsoleExportTests(unittest.TestCase):
                 "solution": "Install Microsoft update",
                 "fix": "Install the applicable patch",
             },
+
             (
                 "GET",
                 "/vulnerabilities/apache-vuln/solutions",
@@ -131,6 +138,7 @@ class ConsoleExportTests(unittest.TestCase):
                     "apache-configure",
                 ],
             },
+
             (
                 "GET",
                 "/solutions/apache-upgrade",
@@ -142,6 +150,7 @@ class ConsoleExportTests(unittest.TestCase):
                     "text": "Install latest release",
                 },
             },
+
             (
                 "GET",
                 "/solutions/apache-configure",
@@ -153,6 +162,7 @@ class ConsoleExportTests(unittest.TestCase):
                     "text": "Disable legacy module",
                 },
             },
+
             (
                 "GET",
                 "/assets/42/vulnerabilities/apache-vuln",
@@ -161,10 +171,13 @@ class ConsoleExportTests(unittest.TestCase):
                     {
                         "checkId": "apache-check",
                         "status": "vulnerable-version",
-                        "proof": "<p>Apache version 2.4.0</p>",
+                        "proof": (
+                            "<p>Apache version 2.4.0</p>"
+                        ),
                     }
                 ]
             },
+
             (
                 "POST",
                 "/tickets",
@@ -192,6 +205,9 @@ class ConsoleExportTests(unittest.TestCase):
         ):
             nonlocal filter_requests
 
+            # -----------------------------
+            # Rapid7 requests
+            # -----------------------------
             if url.startswith(
                 rapid7_origin + "/"
             ):
@@ -226,10 +242,11 @@ class ConsoleExportTests(unittest.TestCase):
                     f"Unexpected Rapid7 request: {key}",
                 )
 
-                return responses[
-                    key
-                ]
+                return responses[key]
 
+            # -----------------------------
+            # Freshservice requests
+            # -----------------------------
             self.assertTrue(
                 url.startswith(
                     freshservice_origin + "/"
@@ -253,17 +270,72 @@ class ConsoleExportTests(unittest.TestCase):
                 ].split("?")[0],
             )
 
+            # -----------------------------
+            # Duplicate-ticket lookup
+            # -----------------------------
             if key == (
                 "GET",
                 "/tickets/filter",
             ):
                 filter_requests += 1
 
+                params = kwargs[
+                    "params"
+                ]
+
+                self.assertEqual(
+                    params[
+                        "workspace_id"
+                    ],
+                    0,
+                )
+
+                query = params[
+                    "query"
+                ]
+
+                # Freshservice requires the entire filter expression
+                # to be wrapped in double quotes.
+                self.assertTrue(
+                    query.startswith(
+                        "\"tag:'rapid7-remediation-"
+                    ),
+                    query,
+                )
+
+                self.assertTrue(
+                    query.endswith(
+                        "\""
+                    ),
+                    query,
+                )
+
+                self.assertIn(
+                    " AND status:",
+                    query,
+                )
+
+                status = (
+                    2
+                    if filter_requests % 2 == 1
+                    else 3
+                )
+
+                self.assertTrue(
+                    query.endswith(
+                        f"AND status:{status}\""
+                    ),
+                    query,
+                )
+
                 return {
                     "tickets": [],
                     "total": 0,
                 }
 
+            # -----------------------------
+            # Workspace lookup
+            # -----------------------------
             if key == (
                 "GET",
                 "/workspaces",
@@ -284,6 +356,9 @@ class ConsoleExportTests(unittest.TestCase):
                     ]
                 }
 
+            # -----------------------------
+            # Service Desk group lookup
+            # -----------------------------
             if key == (
                 "GET",
                 "/groups",
@@ -310,6 +385,9 @@ class ConsoleExportTests(unittest.TestCase):
                     ]
                 }
 
+            # -----------------------------
+            # Ticket creation
+            # -----------------------------
             if key == (
                 "POST",
                 "/tickets",
@@ -385,12 +463,35 @@ class ConsoleExportTests(unittest.TestCase):
                     "Vulnerability Management",
                 )
 
+                self.assertIn(
+                    "rapid7-insightvm",
+                    payload[
+                        "tags"
+                    ],
+                )
+
+                self.assertTrue(
+                    any(
+                        tag.startswith(
+                            "rapid7-remediation-"
+                        )
+                        for tag
+                        in payload[
+                            "tags"
+                        ]
+                    )
+                )
+
                 description = payload[
                     "description"
                 ]
 
                 self.assertIn(
-                    "<h2>Rapid7 Remediation Details</h2>",
+                    (
+                        "<h2>"
+                        "Rapid7 Remediation Details"
+                        "</h2>"
+                    ),
                     description,
                 )
 
@@ -420,16 +521,22 @@ class ConsoleExportTests(unittest.TestCase):
                 )
 
                 self.assertIn(
-                    "<h2>Rapid7 Proof by Asset</h2>",
+                    (
+                        "<h2>"
+                        "Rapid7 Proof by Asset"
+                        "</h2>"
+                    ),
                     description,
                 )
 
-                # Rapid7 proof content is intentionally HTML-escaped
-                # before being embedded inside the Freshservice ticket.
+                # Rapid7 proof is intentionally HTML-escaped
+                # inside a <pre> block.
                 self.assertIn(
                     (
                         "<pre>"
-                        "&lt;p&gt;Apache version 2.4.0&lt;/p&gt;"
+                        "&lt;p&gt;"
+                        "Apache version 2.4.0"
+                        "&lt;/p&gt;"
                         "</pre>"
                     ),
                     description,
@@ -470,7 +577,7 @@ class ConsoleExportTests(unittest.TestCase):
                             "password"
                         ),
                         "FRESHSERVICE_DOMAIN": (
-                            "https://example.freshservice.com"
+                            "https://alterna.freshservice.com"
                         ),
                         "FRESHSERVICE_API_KEY": (
                             "fresh-key"
@@ -502,6 +609,9 @@ class ConsoleExportTests(unittest.TestCase):
             ):
                 main()
 
+            # -----------------------------
+            # Generated CSV
+            # -----------------------------
             with output.open(
                 newline="",
                 encoding="utf-8",
@@ -550,9 +660,12 @@ class ConsoleExportTests(unittest.TestCase):
                     ],
                 )
 
-        # Performance regression check:
-        # the optimized CLI must not download the global
-        # paginated Rapid7 vulnerability catalog.
+        # -------------------------------------------------
+        # Catalog optimization regression check
+        # -------------------------------------------------
+
+        # The optimized path must never download the full
+        # paginated vulnerability catalog.
         self.assertNotIn(
             (
                 "GET",
@@ -561,7 +674,9 @@ class ConsoleExportTests(unittest.TestCase):
             seen,
         )
 
-        # Moderate vulnerabilities should not reach solution lookup.
+        # Moderate vulnerability details are retrieved so they
+        # can be classified, but the vulnerability must not
+        # proceed to solution lookup.
         self.assertNotIn(
             (
                 "GET",
@@ -570,7 +685,7 @@ class ConsoleExportTests(unittest.TestCase):
             seen,
         )
 
-        # Rapid7 Microsoft Patch vulnerabilities should not reach
+        # Microsoft Patch findings must also stop before
         # solution lookup.
         self.assertNotIn(
             (
@@ -642,11 +757,14 @@ class ConsoleExportTests(unittest.TestCase):
             expected_rapid7_requests,
         )
 
+        # Two findings, each checked against Open and Pending
+        # Freshservice statuses.
         self.assertEqual(
             filter_requests,
             4,
         )
 
+        # Two Rapid7 solutions should produce two ticket requests.
         self.assertEqual(
             len(
                 ticket_bodies
@@ -668,6 +786,8 @@ class ConsoleExportTests(unittest.TestCase):
             },
         )
 
+        # The two Rapid7 solutions have different stable
+        # deduplication tags.
         self.assertNotEqual(
             ticket_bodies[
                 0
@@ -681,6 +801,8 @@ class ConsoleExportTests(unittest.TestCase):
             ],
         )
 
+        # Workspace and group are cached after the first lookup,
+        # so these should occur only once despite two tickets.
         self.assertEqual(
             routing_requests,
             [
