@@ -17,6 +17,10 @@ OPEN_STATUSES = (2, 3)
 TICKET_CATEGORY = "Digital Security"
 TICKET_SUB_CATEGORY = "Vulnerability Management"
 
+# Required by the Freshservice ticket creation API.
+DEFAULT_STATUS = 2
+DEFAULT_PRIORITY = 2
+
 
 class FreshserviceClient:
     def __init__(
@@ -86,7 +90,8 @@ class FreshserviceClient:
             or workspace_id <= 0
         ):
             raise ValueError(
-                "Freshservice workspace ID must be a positive integer"
+                "Freshservice workspace ID must be "
+                "a positive integer"
             )
 
         if (
@@ -95,14 +100,18 @@ class FreshserviceClient:
             or group_id <= 0
         ):
             raise ValueError(
-                "Freshservice group ID must be a positive integer"
+                "Freshservice group ID must be "
+                "a positive integer"
             )
 
         self.base_url = (
             f"https://{parsed.netloc}/api/v2"
         )
 
-        self.requester_email = requester_email.strip()
+        self.requester_email = (
+            requester_email.strip()
+        )
+
         self.workspace_id = workspace_id
         self.group_id = group_id
 
@@ -130,9 +139,12 @@ class FreshserviceClient:
         """
         Create a ticket in the explicitly configured workspace and group.
 
-        Duplicate detection is limited to that same workspace. This client
-        does not enumerate Freshservice workspaces or groups and does not
-        consider tickets in any other workspace.
+        Duplicate detection is limited to the same workspace. The client
+        does not enumerate Freshservice workspaces or groups.
+
+        Freshservice requires status and priority during ticket creation.
+        Urgency and impact are deliberately omitted so Freshservice
+        defaults and workflow automations can manage them.
         """
 
         tag = finding_tag(finding)
@@ -175,8 +187,15 @@ class FreshserviceClient:
             "description": _ticket_description(
                 finding
             ),
+
+            # Mandatory Freshservice create-ticket fields.
+            "status": DEFAULT_STATUS,
+            "priority": DEFAULT_PRIORITY,
+
+            # Explicit routing.
             "workspace_id": self.workspace_id,
             "group_id": self.group_id,
+
             "category": TICKET_CATEGORY,
             "sub_category": TICKET_SUB_CATEGORY,
             "tags": [
@@ -217,7 +236,7 @@ def finding_tag(
     Generate a stable remediation tag for duplicate detection.
 
     Detailed Rapid7 solutions include the solution ID. Catalog fallback
-    findings use solution text and fix details.
+    findings use the solution text and fix details.
     """
 
     if finding.solution_id:
@@ -260,7 +279,7 @@ def _ticket_description(
     """
     Build the Freshservice HTML description.
 
-    Rapid7-supplied values are HTML-escaped before insertion.
+    All Rapid7-provided values are HTML escaped before insertion.
     """
 
     assets = (
