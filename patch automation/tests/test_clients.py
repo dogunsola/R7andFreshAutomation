@@ -32,32 +32,41 @@ class ClientTests(unittest.TestCase):
         http = Mock()
 
         http.request_json.side_effect = [
+            # /asset_groups page 0
             page(
                 [
                     {
                         "id": 1,
-                        "name":
-                            "other workstations/laptops",
+                        "name": (
+                            "other workstations/laptops"
+                        ),
                     }
                 ],
                 2,
             ),
+
+            # /asset_groups page 1
             page(
                 [
                     {
                         "id": 2,
-                        "name":
-                            "workstations/laptops",
+                        "name": (
+                            "workstations/laptops"
+                        ),
                     }
                 ],
                 2,
             ),
+
+            # /asset_groups/2/assets
             {
                 "resources": [
                     10,
                     20,
                 ]
             },
+
+            # /assets/search page 0
             page(
                 [
                     {
@@ -71,6 +80,19 @@ class ClientTests(unittest.TestCase):
                 ],
                 2,
             ),
+
+            # /assets/search page 1
+            page(
+                [
+                    {
+                        "id": 20,
+                        "ip": "10.0.0.2",
+                    }
+                ],
+                2,
+            ),
+
+            # Asset 10 vulnerabilities page 0
             page(
                 [
                     {
@@ -80,6 +102,8 @@ class ClientTests(unittest.TestCase):
                 ],
                 2,
             ),
+
+            # Asset 10 vulnerabilities page 1
             page(
                 [
                     {
@@ -93,15 +117,8 @@ class ClientTests(unittest.TestCase):
                 ],
                 2,
             ),
-            page(
-                [
-                    {
-                        "id": 20,
-                        "ip": "10.0.0.2",
-                    }
-                ],
-                2,
-            ),
+
+            # Asset 20 vulnerabilities
             page(
                 [
                     {
@@ -120,10 +137,12 @@ class ClientTests(unittest.TestCase):
             page_size=100,
         )
 
+        assets = list(
+            client.iter_affected_assets()
+        )
+
         self.assertEqual(
-            list(
-                client.iter_affected_assets()
-            ),
+            assets,
             [
                 {
                     "id": 10,
@@ -148,19 +167,78 @@ class ClientTests(unittest.TestCase):
             ],
         )
 
-        calls = http.request_json.call_args_list
-
-        self.assertTrue(
-            all(
-                call.args[1].startswith(
-                    "https://console.example:3780/api/3/"
-                )
-                for call in calls
-            )
+        calls = (
+            http.request_json.call_args_list
         )
 
         self.assertEqual(
-            calls[1].kwargs[
+            len(
+                calls
+            ),
+            8,
+        )
+
+        # ---------------------------------------------
+        # Asset-group page 0
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                0
+            ].args,
+            (
+                "GET",
+                (
+                    "https://console.example:3780/"
+                    "api/3/asset_groups"
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            calls[
+                0
+            ].kwargs[
+                "params"
+            ][
+                "page"
+            ],
+            0,
+        )
+
+        self.assertEqual(
+            calls[
+                0
+            ].kwargs[
+                "params"
+            ][
+                "size"
+            ],
+            100,
+        )
+
+        self.assertEqual(
+            calls[
+                0
+            ].kwargs[
+                "timeout"
+            ],
+            300,
+        )
+
+        self.assertNotIn(
+            "retries",
+            calls[
+                0
+            ].kwargs,
+        )
+
+        # ---------------------------------------------
+        # Asset-group page 1
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                1
+            ].kwargs[
                 "params"
             ][
                 "page"
@@ -169,51 +247,310 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            calls[2].args[1],
+            calls[
+                1
+            ].kwargs[
+                "timeout"
+            ],
+            300,
+        )
+
+        self.assertNotIn(
+            "retries",
+            calls[
+                1
+            ].kwargs,
+        )
+
+        # ---------------------------------------------
+        # Exact asset-group membership request
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                2
+            ].args,
             (
-                "https://console.example:3780/api/3/"
-                "asset_groups/2/assets"
+                "GET",
+                (
+                    "https://console.example:3780/"
+                    "api/3/asset_groups/2/assets"
+                ),
             ),
         )
 
         self.assertEqual(
-            calls[3].args[0],
-            "POST",
+            calls[
+                2
+            ].kwargs,
+            {
+                "timeout": 300,
+            },
+        )
+
+        # ---------------------------------------------
+        # Recent-asset search page 0
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                3
+            ].args,
+            (
+                "POST",
+                (
+                    "https://console.example:3780/"
+                    "api/3/assets/search"
+                ),
+            ),
         )
 
         self.assertEqual(
-            calls[3].kwargs[
+            calls[
+                3
+            ].kwargs[
                 "json_body"
             ],
             {
                 "match": "all",
                 "filters": [
                     {
-                        "field": "last-scan-date",
+                        "field":
+                            "last-scan-date",
                         "operator":
                             "is-within-the-last",
-                        "value": 7,
+                        "value":
+                            7,
                     }
                 ],
             },
         )
 
         self.assertEqual(
-            calls[5].kwargs[
+            calls[
+                3
+            ].kwargs[
                 "params"
-            ][
-                "page"
             ],
-            1,
+            {
+                "page": 0,
+                "size": 100,
+            },
         )
 
         self.assertEqual(
-            calls[6].kwargs[
-                "params"
-            ][
-                "page"
+            calls[
+                3
+            ].kwargs[
+                "timeout"
             ],
-            1,
+            300,
+        )
+
+        self.assertEqual(
+            calls[
+                3
+            ].kwargs[
+                "retries"
+            ],
+            2,
+        )
+
+        # ---------------------------------------------
+        # Recent-asset search page 1
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                4
+            ].args,
+            (
+                "POST",
+                (
+                    "https://console.example:3780/"
+                    "api/3/assets/search"
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            calls[
+                4
+            ].kwargs[
+                "params"
+            ],
+            {
+                "page": 1,
+                "size": 100,
+            },
+        )
+
+        self.assertEqual(
+            calls[
+                4
+            ].kwargs[
+                "timeout"
+            ],
+            300,
+        )
+
+        self.assertEqual(
+            calls[
+                4
+            ].kwargs[
+                "retries"
+            ],
+            2,
+        )
+
+        self.assertEqual(
+            calls[
+                4
+            ].kwargs[
+                "json_body"
+            ],
+            {
+                "match": "all",
+                "filters": [
+                    {
+                        "field":
+                            "last-scan-date",
+                        "operator":
+                            "is-within-the-last",
+                        "value":
+                            7,
+                    }
+                ],
+            },
+        )
+
+        # ---------------------------------------------
+        # Asset 10 vulnerability page 0
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                5
+            ].args,
+            (
+                "GET",
+                (
+                    "https://console.example:3780/api/3/"
+                    "assets/10/vulnerabilities"
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            calls[
+                5
+            ].kwargs[
+                "params"
+            ],
+            {
+                "page": 0,
+                "size": 100,
+            },
+        )
+
+        self.assertEqual(
+            calls[
+                5
+            ].kwargs[
+                "timeout"
+            ],
+            300,
+        )
+
+        self.assertNotIn(
+            "retries",
+            calls[
+                5
+            ].kwargs,
+        )
+
+        # ---------------------------------------------
+        # Asset 10 vulnerability page 1
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                6
+            ].args,
+            (
+                "GET",
+                (
+                    "https://console.example:3780/api/3/"
+                    "assets/10/vulnerabilities"
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            calls[
+                6
+            ].kwargs[
+                "params"
+            ],
+            {
+                "page": 1,
+                "size": 100,
+            },
+        )
+
+        self.assertEqual(
+            calls[
+                6
+            ].kwargs[
+                "timeout"
+            ],
+            300,
+        )
+
+        self.assertNotIn(
+            "retries",
+            calls[
+                6
+            ].kwargs,
+        )
+
+        # ---------------------------------------------
+        # Asset 20 vulnerability page
+        # ---------------------------------------------
+        self.assertEqual(
+            calls[
+                7
+            ].args,
+            (
+                "GET",
+                (
+                    "https://console.example:3780/api/3/"
+                    "assets/20/vulnerabilities"
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            calls[
+                7
+            ].kwargs[
+                "params"
+            ],
+            {
+                "page": 0,
+                "size": 100,
+            },
+        )
+
+        self.assertEqual(
+            calls[
+                7
+            ].kwargs[
+                "timeout"
+            ],
+            300,
+        )
+
+        self.assertNotIn(
+            "retries",
+            calls[
+                7
+            ].kwargs,
         )
 
     def test_console_catalog_filters_severity_and_category(
@@ -267,13 +604,17 @@ class ClientTests(unittest.TestCase):
             http=http,
         )
 
+        vulnerabilities = list(
+            client.iter_vulnerability_catalog()
+        )
+
         self.assertEqual(
             [
                 vulnerability[
                     "id"
                 ]
                 for vulnerability
-                in client.iter_vulnerability_catalog()
+                in vulnerabilities
             ],
             [
                 "a",
@@ -282,15 +623,48 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            http.request_json.call_args.args,
-            (
-                "GET",
-                (
-                    "https://console:3780/api/3/"
-                    "vulnerabilities"
-                ),
-            ),
+            http.request_json.call_count,
+            2,
         )
+
+        calls = (
+            http.request_json.call_args_list
+        )
+
+        self.assertEqual(
+            calls[
+                0
+            ].kwargs[
+                "params"
+            ][
+                "page"
+            ],
+            0,
+        )
+
+        self.assertEqual(
+            calls[
+                1
+            ].kwargs[
+                "params"
+            ][
+                "page"
+            ],
+            1,
+        )
+
+        for call in calls:
+            self.assertEqual(
+                call.kwargs[
+                    "timeout"
+                ],
+                300,
+            )
+
+            self.assertNotIn(
+                "retries",
+                call.kwargs,
+            )
 
     def test_missing_group_fails_without_broadening_scope(
         self,
@@ -366,6 +740,15 @@ class ClientTests(unittest.TestCase):
             2,
         )
 
+        self.assertEqual(
+            http.request_json.call_args_list[
+                1
+            ].kwargs,
+            {
+                "timeout": 300,
+            },
+        )
+
     def test_freshservice_creates_tagged_ticket_when_no_open_duplicate_exists(
         self,
     ) -> None:
@@ -411,7 +794,9 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            result["id"],
+            result[
+                "id"
+            ],
             123,
         )
 
@@ -424,12 +809,16 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            len(calls),
+            len(
+                calls
+            ),
             3,
         )
 
         self.assertEqual(
-            calls[0].args,
+            calls[
+                0
+            ].args,
             (
                 "GET",
                 (
@@ -440,7 +829,9 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            calls[0].kwargs[
+            calls[
+                0
+            ].kwargs[
                 "params"
             ],
             {
@@ -453,7 +844,9 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            calls[1].kwargs[
+            calls[
+                1
+            ].kwargs[
                 "params"
             ],
             {
@@ -466,7 +859,9 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            calls[2].args,
+            calls[
+                2
+            ].args,
             (
                 "POST",
                 (
@@ -476,23 +871,11 @@ class ClientTests(unittest.TestCase):
             ),
         )
 
-        payload = calls[2].kwargs[
+        payload = calls[
+            2
+        ].kwargs[
             "json_body"
         ]
-
-        self.assertEqual(
-            payload[
-                "workspace_id"
-            ],
-            2,
-        )
-
-        self.assertEqual(
-            payload[
-                "group_id"
-            ],
-            11000367285,
-        )
 
         self.assertEqual(
             payload[
@@ -506,6 +889,20 @@ class ClientTests(unittest.TestCase):
                 "subject"
             ],
             "Upgrade",
+        )
+
+        self.assertEqual(
+            payload[
+                "workspace_id"
+            ],
+            2,
+        )
+
+        self.assertEqual(
+            payload[
+                "group_id"
+            ],
+            11000367285,
         )
 
         self.assertEqual(
@@ -547,6 +944,13 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertIn(
+            "rapid7-insightvm",
+            payload[
+                "tags"
+            ],
+        )
+
+        self.assertIn(
             expected_tag,
             payload[
                 "tags"
@@ -554,30 +958,11 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertFalse(
-            calls[2].kwargs[
+            calls[
+                2
+            ].kwargs[
                 "retryable"
             ]
-        )
-
-        requested_urls = {
-            call.args[1]
-            for call in calls
-        }
-
-        self.assertNotIn(
-            (
-                "https://alterna.freshservice.com/"
-                "api/v2/workspaces"
-            ),
-            requested_urls,
-        )
-
-        self.assertNotIn(
-            (
-                "https://alterna.freshservice.com/"
-                "api/v2/groups"
-            ),
-            requested_urls,
         )
 
     def test_freshservice_skips_matching_open_ticket(
@@ -612,10 +997,14 @@ class ClientTests(unittest.TestCase):
             "Install 2.0",
         )
 
-        self.assertIsNone(
+        result = (
             client.create_ticket_if_missing(
                 finding
             )
+        )
+
+        self.assertIsNone(
+            result
         )
 
         self.assertEqual(
@@ -739,7 +1128,7 @@ class ClientTests(unittest.TestCase):
                     group_id=invalid_group_id,
                 )
 
-        for domain in (
+        invalid_domains = (
             "http://alterna.freshservice.com",
             (
                 "https://alterna.freshservice.com"
@@ -751,7 +1140,9 @@ class ClientTests(unittest.TestCase):
                 "https://alterna.freshservice.com/"
                 "api/v2"
             ),
-        ):
+        )
+
+        for domain in invalid_domains:
             with (
                 self.subTest(
                     domain=domain
