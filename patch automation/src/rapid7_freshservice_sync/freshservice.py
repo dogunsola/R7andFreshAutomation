@@ -17,8 +17,6 @@ OPEN_STATUSES = (2, 3)
 TICKET_CATEGORY = "Digital Security"
 TICKET_SUB_CATEGORY = "Vulnerability Management"
 
-MEDIUM = 2
-
 
 class FreshserviceClient:
     def __init__(
@@ -177,10 +175,6 @@ class FreshserviceClient:
             "description": _ticket_description(
                 finding
             ),
-            "urgency": MEDIUM,
-            "impact": MEDIUM,
-            "priority": MEDIUM,
-            "status": 2,
             "workspace_id": self.workspace_id,
             "group_id": self.group_id,
             "category": TICKET_CATEGORY,

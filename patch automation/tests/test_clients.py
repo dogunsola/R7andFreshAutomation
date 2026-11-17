@@ -283,25 +283,10 @@ class ClientTests(unittest.TestCase):
             "Upgrade",
         )
 
-        self.assertEqual(
-            payload["status"],
-            2,
-        )
-
-        self.assertEqual(
-            payload["urgency"],
-            2,
-        )
-
-        self.assertEqual(
-            payload["impact"],
-            2,
-        )
-
-        self.assertEqual(
-            payload["priority"],
-            2,
-        )
+        self.assertNotIn("status", payload)
+        self.assertNotIn("urgency", payload)
+        self.assertNotIn("impact", payload)
+        self.assertNotIn("priority", payload)
 
         self.assertEqual(
             payload["category"],
