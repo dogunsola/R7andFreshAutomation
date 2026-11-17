@@ -279,11 +279,6 @@ class ConsoleExportTests(unittest.TestCase):
                     query,
                 )
 
-                self.assertIn(
-                    " AND status:",
-                    query,
-                )
-
                 self.assertTrue(
                     (
                         "AND status:2\""
@@ -327,6 +322,32 @@ class ConsoleExportTests(unittest.TestCase):
                     "security@example.com",
                 )
 
+                # Required by Freshservice.
+                self.assertEqual(
+                    payload[
+                        "status"
+                    ],
+                    2,
+                )
+
+                self.assertEqual(
+                    payload[
+                        "priority"
+                    ],
+                    2,
+                )
+
+                # Deliberately left to Freshservice.
+                self.assertNotIn(
+                    "urgency",
+                    payload,
+                )
+
+                self.assertNotIn(
+                    "impact",
+                    payload,
+                )
+
                 self.assertEqual(
                     payload[
                         "workspace_id"
@@ -353,28 +374,6 @@ class ConsoleExportTests(unittest.TestCase):
                         "sub_category"
                     ],
                     "Vulnerability Management",
-                )
-
-                # Ticket creation deliberately does not
-                # override these Freshservice-controlled fields.
-                self.assertNotIn(
-                    "status",
-                    payload,
-                )
-
-                self.assertNotIn(
-                    "urgency",
-                    payload,
-                )
-
-                self.assertNotIn(
-                    "impact",
-                    payload,
-                )
-
-                self.assertNotIn(
-                    "priority",
-                    payload,
                 )
 
                 self.assertIn(
@@ -603,8 +602,6 @@ class ConsoleExportTests(unittest.TestCase):
                 ],
             )
 
-        # The performance optimization must remain:
-        # do not download the complete global catalog.
         self.assertNotIn(
             (
                 "GET",
@@ -613,8 +610,6 @@ class ConsoleExportTests(unittest.TestCase):
             rapid7_requests,
         )
 
-        # Moderate findings are inspected but must not
-        # reach Rapid7 solution lookup.
         self.assertNotIn(
             (
                 "GET",
@@ -623,8 +618,6 @@ class ConsoleExportTests(unittest.TestCase):
             rapid7_requests,
         )
 
-        # Microsoft Patch findings must not reach
-        # Rapid7 solution lookup.
         self.assertNotIn(
             (
                 "GET",
@@ -693,7 +686,6 @@ class ConsoleExportTests(unittest.TestCase):
             expected_rapid7_requests,
         )
 
-        # No dynamic Freshservice routing lookup is allowed.
         self.assertNotIn(
             (
                 "GET",
@@ -710,7 +702,6 @@ class ConsoleExportTests(unittest.TestCase):
             freshservice_requests,
         )
 
-        # There are two Rapid7 remediation solutions.
         self.assertEqual(
             len(
                 ticket_bodies
@@ -723,8 +714,7 @@ class ConsoleExportTests(unittest.TestCase):
                 body[
                     "subject"
                 ]
-                for body
-                in ticket_bodies
+                for body in ticket_bodies
             },
             {
                 "Configure Apache",
@@ -732,8 +722,6 @@ class ConsoleExportTests(unittest.TestCase):
             },
         )
 
-        # Both tickets are explicitly routed only to
-        # workspace 2 and IT Security.
         for body in ticket_bodies:
             self.assertEqual(
                 body[
@@ -749,10 +737,18 @@ class ConsoleExportTests(unittest.TestCase):
                 11000367285,
             )
 
-            # Freshservice controls these fields.
-            self.assertNotIn(
-                "status",
-                body,
+            self.assertEqual(
+                body[
+                    "status"
+                ],
+                2,
+            )
+
+            self.assertEqual(
+                body[
+                    "priority"
+                ],
+                2,
             )
 
             self.assertNotIn(
@@ -765,13 +761,6 @@ class ConsoleExportTests(unittest.TestCase):
                 body,
             )
 
-            self.assertNotIn(
-                "priority",
-                body,
-            )
-
-        # Every finding is checked against statuses 2 and 3
-        # for duplicate detection only.
         self.assertEqual(
             len(
                 filter_requests
@@ -787,8 +776,6 @@ class ConsoleExportTests(unittest.TestCase):
                 2,
             )
 
-        # Each Rapid7 solution gets a distinct stable
-        # duplicate-detection tag.
         first_tags = set(
             ticket_bodies[
                 0
