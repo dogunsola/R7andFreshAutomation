@@ -17,7 +17,7 @@ OPEN_STATUSES = (2, 3)
 TICKET_CATEGORY = "Digital Security"
 TICKET_SUB_CATEGORY = "Vulnerability Management"
 
-# Required by the Freshservice ticket creation API.
+# Freshservice requires status and priority in create-ticket requests.
 DEFAULT_STATUS = 2
 DEFAULT_PRIORITY = 2
 
@@ -49,8 +49,7 @@ class FreshserviceClient:
 
         if not hostname.endswith(".freshservice.com"):
             raise ValueError(
-                "Freshservice hostname must end with "
-                ".freshservice.com"
+                "Freshservice hostname must end with .freshservice.com"
             )
 
         if parsed.username or parsed.password:
@@ -60,8 +59,8 @@ class FreshserviceClient:
 
         if parsed.path not in ("", "/"):
             raise ValueError(
-                "Freshservice domain must contain only the "
-                "HTTPS origin and must not include a path"
+                "Freshservice domain must contain only the HTTPS "
+                "origin and must not include a path"
             )
 
         if (
@@ -70,8 +69,7 @@ class FreshserviceClient:
             or parsed.fragment
         ):
             raise ValueError(
-                "Freshservice domain must contain only the "
-                "HTTPS origin"
+                "Freshservice domain must contain only the HTTPS origin"
             )
 
         if not api_key.strip():
@@ -90,8 +88,7 @@ class FreshserviceClient:
             or workspace_id <= 0
         ):
             raise ValueError(
-                "Freshservice workspace ID must be "
-                "a positive integer"
+                "Freshservice workspace ID must be a positive integer"
             )
 
         if (
@@ -100,18 +97,14 @@ class FreshserviceClient:
             or group_id <= 0
         ):
             raise ValueError(
-                "Freshservice group ID must be "
-                "a positive integer"
+                "Freshservice group ID must be a positive integer"
             )
 
         self.base_url = (
             f"https://{parsed.netloc}/api/v2"
         )
 
-        self.requester_email = (
-            requester_email.strip()
-        )
-
+        self.requester_email = requester_email.strip()
         self.workspace_id = workspace_id
         self.group_id = group_id
 
@@ -137,14 +130,14 @@ class FreshserviceClient:
         finding: Finding,
     ) -> dict[str, Any] | None:
         """
-        Create a ticket in the explicitly configured workspace and group.
+        Create a Freshservice ticket in the explicitly configured
+        workspace and group.
 
-        Duplicate detection is limited to the same workspace. The client
-        does not enumerate Freshservice workspaces or groups.
+        Duplicate checks are limited to the configured workspace.
+        Workspaces and groups are not dynamically enumerated.
 
-        Freshservice requires status and priority during ticket creation.
-        Urgency and impact are deliberately omitted so Freshservice
-        defaults and workflow automations can manage them.
+        Freshservice requires status and priority during ticket
+        creation. Urgency and impact are deliberately omitted.
         """
 
         tag = finding_tag(finding)
@@ -187,15 +180,10 @@ class FreshserviceClient:
             "description": _ticket_description(
                 finding
             ),
-
-            # Mandatory Freshservice create-ticket fields.
             "status": DEFAULT_STATUS,
             "priority": DEFAULT_PRIORITY,
-
-            # Explicit routing.
             "workspace_id": self.workspace_id,
             "group_id": self.group_id,
-
             "category": TICKET_CATEGORY,
             "sub_category": TICKET_SUB_CATEGORY,
             "tags": [
@@ -233,10 +221,10 @@ def finding_tag(
     finding: Finding,
 ) -> str:
     """
-    Generate a stable remediation tag for duplicate detection.
+    Generate a stable tag for Freshservice duplicate detection.
 
-    Detailed Rapid7 solutions include the solution ID. Catalog fallback
-    findings use the solution text and fix details.
+    Detailed Rapid7 remediation records include the solution ID.
+    Catalog-fallback records use solution text and fix details.
     """
 
     if finding.solution_id:
@@ -277,9 +265,9 @@ def _ticket_description(
     finding: Finding,
 ) -> str:
     """
-    Build the Freshservice HTML description.
+    Build the Freshservice HTML ticket description.
 
-    All Rapid7-provided values are HTML escaped before insertion.
+    Rapid7-provided values are HTML-escaped before insertion.
     """
 
     assets = (
