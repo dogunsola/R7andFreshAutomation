@@ -43,7 +43,6 @@ class ConsoleExportTests(unittest.TestCase):
                     }
                 ]
             ),
-
             (
                 "GET",
                 "/asset_groups/8/assets",
@@ -52,7 +51,6 @@ class ConsoleExportTests(unittest.TestCase):
                     42,
                 ]
             },
-
             (
                 "POST",
                 "/assets/search",
@@ -65,7 +63,6 @@ class ConsoleExportTests(unittest.TestCase):
                     }
                 ]
             ),
-
             (
                 "GET",
                 "/assets/42/vulnerabilities",
@@ -89,7 +86,6 @@ class ConsoleExportTests(unittest.TestCase):
                     },
                 ]
             ),
-
             (
                 "GET",
                 "/vulnerabilities/apache-vuln",
@@ -103,7 +99,6 @@ class ConsoleExportTests(unittest.TestCase):
                 "solution": "Upgrade Apache",
                 "fix": "Install latest release",
             },
-
             (
                 "GET",
                 "/vulnerabilities/moderate",
@@ -117,7 +112,6 @@ class ConsoleExportTests(unittest.TestCase):
                 "solution": "Upgrade Apache",
                 "fix": "Install latest release",
             },
-
             (
                 "GET",
                 "/vulnerabilities/ms",
@@ -129,9 +123,8 @@ class ConsoleExportTests(unittest.TestCase):
                     "Microsoft Patch",
                 ],
                 "solution": "Install Microsoft update",
-                "fix": "Install the applicable patch",
+                "fix": "Install applicable patch",
             },
-
             (
                 "GET",
                 "/vulnerabilities/apache-vuln/solutions",
@@ -141,7 +134,6 @@ class ConsoleExportTests(unittest.TestCase):
                     "apache-configure",
                 ],
             },
-
             (
                 "GET",
                 "/solutions/apache-upgrade",
@@ -153,7 +145,6 @@ class ConsoleExportTests(unittest.TestCase):
                     "text": "Install latest release",
                 },
             },
-
             (
                 "GET",
                 "/solutions/apache-configure",
@@ -165,7 +156,6 @@ class ConsoleExportTests(unittest.TestCase):
                     "text": "Disable legacy module",
                 },
             },
-
             (
                 "GET",
                 "/assets/42/vulnerabilities/apache-vuln",
@@ -193,9 +183,6 @@ class ConsoleExportTests(unittest.TestCase):
             url,
             **kwargs,
         ):
-            # -----------------------------------------
-            # Rapid7 requests
-            # -----------------------------------------
             if url.startswith(
                 rapid7_origin + "/"
             ):
@@ -227,19 +214,11 @@ class ConsoleExportTests(unittest.TestCase):
                 self.assertIn(
                     key,
                     responses,
-                    (
-                        "Unexpected Rapid7 request: "
-                        f"{key}"
-                    ),
+                    f"Unexpected Rapid7 request: {key}",
                 )
 
-                return responses[
-                    key
-                ]
+                return responses[key]
 
-            # -----------------------------------------
-            # Freshservice requests
-            # -----------------------------------------
             self.assertTrue(
                 url.startswith(
                     freshservice_origin + "/"
@@ -267,9 +246,6 @@ class ConsoleExportTests(unittest.TestCase):
                 key
             )
 
-            # -----------------------------------------
-            # Duplicate ticket search
-            # -----------------------------------------
             if key == (
                 "GET",
                 "/tickets/filter",
@@ -308,6 +284,18 @@ class ConsoleExportTests(unittest.TestCase):
                     query,
                 )
 
+                self.assertTrue(
+                    (
+                        "AND status:2\""
+                        in query
+                    )
+                    or (
+                        "AND status:3\""
+                        in query
+                    ),
+                    query,
+                )
+
                 filter_requests.append(
                     {
                         "workspace_id":
@@ -324,9 +312,6 @@ class ConsoleExportTests(unittest.TestCase):
                     "total": 0,
                 }
 
-            # -----------------------------------------
-            # Ticket creation
-            # -----------------------------------------
             if key == (
                 "POST",
                 "/tickets",
@@ -340,34 +325,6 @@ class ConsoleExportTests(unittest.TestCase):
                         "email"
                     ],
                     "security@example.com",
-                )
-
-                self.assertEqual(
-                    payload[
-                        "status"
-                    ],
-                    2,
-                )
-
-                self.assertEqual(
-                    payload[
-                        "urgency"
-                    ],
-                    2,
-                )
-
-                self.assertEqual(
-                    payload[
-                        "impact"
-                    ],
-                    2,
-                )
-
-                self.assertEqual(
-                    payload[
-                        "priority"
-                    ],
-                    2,
                 )
 
                 self.assertEqual(
@@ -398,6 +355,28 @@ class ConsoleExportTests(unittest.TestCase):
                     "Vulnerability Management",
                 )
 
+                # Ticket creation deliberately does not
+                # override these Freshservice-controlled fields.
+                self.assertNotIn(
+                    "status",
+                    payload,
+                )
+
+                self.assertNotIn(
+                    "urgency",
+                    payload,
+                )
+
+                self.assertNotIn(
+                    "impact",
+                    payload,
+                )
+
+                self.assertNotIn(
+                    "priority",
+                    payload,
+                )
+
                 self.assertIn(
                     "rapid7-insightvm",
                     payload[
@@ -407,8 +386,7 @@ class ConsoleExportTests(unittest.TestCase):
 
                 remediation_tags = [
                     tag
-                    for tag
-                    in payload[
+                    for tag in payload[
                         "tags"
                     ]
                     if tag.startswith(
@@ -470,8 +448,6 @@ class ConsoleExportTests(unittest.TestCase):
                     description,
                 )
 
-                # Rapid7-supplied HTML is escaped before
-                # being placed in the Freshservice page.
                 self.assertIn(
                     (
                         "<pre>"
@@ -495,11 +471,9 @@ class ConsoleExportTests(unittest.TestCase):
                                 ticket_bodies
                             )
                         ),
-                        "status": 2,
                     }
                 }
 
-            # No workspace/group discovery should occur.
             if key in {
                 (
                     "GET",
@@ -535,29 +509,22 @@ class ConsoleExportTests(unittest.TestCase):
                                 "/api/3"
                             )
                         ),
-
                         "RAPID7_CONSOLE_USERNAME":
                             "user",
-
                         "RAPID7_CONSOLE_PASSWORD":
                             "password",
-
                         "FRESHSERVICE_DOMAIN": (
                             "https://alterna."
                             "freshservice.com"
                         ),
-
                         "FRESHSERVICE_API_KEY":
                             "fresh-key",
-
                         "FRESHSERVICE_REQUESTER_EMAIL":
                             "security@example.com",
-
                         "FRESHSERVICE_WORKSPACE_ID":
                             str(
                                 workspace_id
                             ),
-
                         "FRESHSERVICE_GROUP_ID":
                             str(
                                 group_id
@@ -565,7 +532,6 @@ class ConsoleExportTests(unittest.TestCase):
                     },
                     clear=True,
                 ),
-
                 patch(
                     "sys.argv",
                     [
@@ -577,7 +543,6 @@ class ConsoleExportTests(unittest.TestCase):
                         "--create-tickets",
                     ],
                 ),
-
                 patch(
                     (
                         "rapid7_freshservice_sync."
@@ -588,9 +553,6 @@ class ConsoleExportTests(unittest.TestCase):
             ):
                 main()
 
-            # -----------------------------------------
-            # Validate CSV output
-            # -----------------------------------------
             with output.open(
                 newline="",
                 encoding="utf-8",
@@ -641,11 +603,8 @@ class ConsoleExportTests(unittest.TestCase):
                 ],
             )
 
-        # ---------------------------------------------
-        # Verify Rapid7 optimized behavior
-        # ---------------------------------------------
-
-        # Do not download the complete global catalog.
+        # The performance optimization must remain:
+        # do not download the complete global catalog.
         self.assertNotIn(
             (
                 "GET",
@@ -654,19 +613,18 @@ class ConsoleExportTests(unittest.TestCase):
             rapid7_requests,
         )
 
-        # Moderate findings are loaded for classification,
-        # but must not proceed to solution lookup.
+        # Moderate findings are inspected but must not
+        # reach Rapid7 solution lookup.
         self.assertNotIn(
             (
                 "GET",
-                "/vulnerabilities/"
-                "moderate/solutions",
+                "/vulnerabilities/moderate/solutions",
             ),
             rapid7_requests,
         )
 
-        # Microsoft Patch findings must not proceed to
-        # solution lookup.
+        # Microsoft Patch findings must not reach
+        # Rapid7 solution lookup.
         self.assertNotIn(
             (
                 "GET",
@@ -680,37 +638,30 @@ class ConsoleExportTests(unittest.TestCase):
                 "GET",
                 "/asset_groups",
             ),
-
             (
                 "GET",
                 "/asset_groups/8/assets",
             ),
-
             (
                 "POST",
                 "/assets/search",
             ),
-
             (
                 "GET",
                 "/assets/42/vulnerabilities",
             ),
-
             (
                 "GET",
                 "/vulnerabilities/apache-vuln",
             ),
-
             (
                 "GET",
                 "/vulnerabilities/moderate",
             ),
-
             (
                 "GET",
                 "/vulnerabilities/ms",
             ),
-
             (
                 "GET",
                 (
@@ -718,17 +669,14 @@ class ConsoleExportTests(unittest.TestCase):
                     "apache-vuln/solutions"
                 ),
             ),
-
             (
                 "GET",
                 "/solutions/apache-upgrade",
             ),
-
             (
                 "GET",
                 "/solutions/apache-configure",
             ),
-
             (
                 "GET",
                 (
@@ -745,10 +693,7 @@ class ConsoleExportTests(unittest.TestCase):
             expected_rapid7_requests,
         )
 
-        # ---------------------------------------------
-        # Verify Freshservice scoping
-        # ---------------------------------------------
-
+        # No dynamic Freshservice routing lookup is allowed.
         self.assertNotIn(
             (
                 "GET",
@@ -765,7 +710,7 @@ class ConsoleExportTests(unittest.TestCase):
             freshservice_requests,
         )
 
-        # Two Rapid7 remediation solutions.
+        # There are two Rapid7 remediation solutions.
         self.assertEqual(
             len(
                 ticket_bodies
@@ -787,8 +732,8 @@ class ConsoleExportTests(unittest.TestCase):
             },
         )
 
-        # Every created ticket must use only the explicitly
-        # configured IT workspace and IT Security group.
+        # Both tickets are explicitly routed only to
+        # workspace 2 and IT Security.
         for body in ticket_bodies:
             self.assertEqual(
                 body[
@@ -804,8 +749,29 @@ class ConsoleExportTests(unittest.TestCase):
                 11000367285,
             )
 
-        # Each finding gets checked against both Open and
-        # Pending status, so 2 findings x 2 statuses = 4.
+            # Freshservice controls these fields.
+            self.assertNotIn(
+                "status",
+                body,
+            )
+
+            self.assertNotIn(
+                "urgency",
+                body,
+            )
+
+            self.assertNotIn(
+                "impact",
+                body,
+            )
+
+            self.assertNotIn(
+                "priority",
+                body,
+            )
+
+        # Every finding is checked against statuses 2 and 3
+        # for duplicate detection only.
         self.assertEqual(
             len(
                 filter_requests
@@ -821,8 +787,8 @@ class ConsoleExportTests(unittest.TestCase):
                 2,
             )
 
-        # Each remediation solution must have its own
-        # deterministic deduplication tag.
+        # Each Rapid7 solution gets a distinct stable
+        # duplicate-detection tag.
         first_tags = set(
             ticket_bodies[
                 0
