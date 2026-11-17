@@ -6,16 +6,13 @@ from urllib.parse import urlparse
 
 from .http import ApiError, HttpClient
 from .models import (
+    MAX_PROOF_VULNERABILITIES,
     AffectedAsset,
     Finding,
-    MAX_PROOF_VULNERABILITIES,
 )
 
 
-OPEN_STATUSES = (
-    2,
-    3,
-)
+OPEN_STATUSES = (2, 3)
 
 WORKSPACE_NAME = "IT, Banking Support & Marketing"
 GROUP_NAME = "Service Desk"
@@ -26,11 +23,6 @@ TICKET_SUB_CATEGORY = "Vulnerability Management"
 MEDIUM = 2
 RESOURCE_PAGE_SIZE = 100
 
-# Explicitly approved Freshservice custom hostnames.
-APPROVED_CUSTOM_DOMAINS = {
-    "support.alterna.ca",
-}
-
 
 class FreshserviceClient:
     def __init__(
@@ -40,9 +32,7 @@ class FreshserviceClient:
         requester_email: str,
         http: HttpClient | None = None,
     ) -> None:
-        normalized_domain = (
-            domain.strip().rstrip("/")
-        )
+        normalized_domain = domain.strip().rstrip("/")
 
         parsed = urlparse(
             normalized_domain
@@ -60,18 +50,12 @@ class FreshserviceClient:
 
         hostname = parsed.hostname.lower()
 
-        hostname_allowed = (
-            hostname.endswith(
-                ".freshservice.com"
-            )
-            or hostname
-            in APPROVED_CUSTOM_DOMAINS
-        )
-
-        if not hostname_allowed:
+        if not hostname.endswith(
+            ".freshservice.com"
+        ):
             raise ValueError(
-                "Freshservice hostname is not an approved "
-                "Freshservice domain"
+                "Freshservice hostname must end with "
+                ".freshservice.com"
             )
 
         if (
@@ -82,13 +66,10 @@ class FreshserviceClient:
                 "Freshservice domain must not contain credentials"
             )
 
-        if parsed.path not in (
-            "",
-            "/",
-        ):
+        if parsed.path not in ("", "/"):
             raise ValueError(
-                "Freshservice domain must contain only the HTTPS "
-                "origin and must not include a path such as /api/v2"
+                "Freshservice domain must contain only the "
+                "HTTPS origin and must not include a path"
             )
 
         if (
@@ -97,7 +78,8 @@ class FreshserviceClient:
             or parsed.fragment
         ):
             raise ValueError(
-                "Freshservice domain must contain only the HTTPS origin"
+                "Freshservice domain must contain only the "
+                "HTTPS origin"
             )
 
         if not api_key.strip():
@@ -119,7 +101,7 @@ class FreshserviceClient:
         )
 
         token = base64.b64encode(
-            f"{api_key}:X".encode()
+            f"{api_key.strip()}:X".encode()
         ).decode(
             "ascii"
         )
@@ -139,15 +121,8 @@ class FreshserviceClient:
             )
         )
 
-        self._workspace_id: (
-            int
-            | None
-        ) = None
-
-        self._group_id: (
-            int
-            | None
-        ) = None
+        self._workspace_id: int | None = None
+        self._group_id: int | None = None
 
     def create_ticket_if_missing(
         self,
@@ -157,27 +132,22 @@ class FreshserviceClient:
             finding
         )
 
+        # Check both Open and Pending tickets before creating
+        # another ticket for the same Rapid7 remediation.
         for status in OPEN_STATUSES:
-            response = (
-                self.http.request_json(
-                    "GET",
-                    (
-                        f"{self.base_url}"
-                        "/tickets/filter"
-                    ),
-                    params={
-                        "query": (
-                            f"tag: '{tag}' "
-                            f"AND status:{status}"
-                        )
-                    },
-                )
+            response = self.http.request_json(
+                "GET",
+                f"{self.base_url}/tickets/filter",
+                params={
+                    "query": (
+                        f"tag: '{tag}' "
+                        f"AND status:{status}"
+                    )
+                },
             )
 
             tickets = (
-                response.get(
-                    "tickets"
-                )
+                response.get("tickets")
                 if isinstance(
                     response,
                     dict,
@@ -190,45 +160,55 @@ class FreshserviceClient:
                 list,
             ):
                 raise ApiError(
-                    "Freshservice ticket filter "
-                    "returned an invalid response"
+                    "Freshservice ticket filter returned "
+                    "an invalid response"
                 )
 
             if tickets:
                 return None
 
-        (
-            workspace_id,
-            group_id,
-        ) = self._ticket_routing_ids()
+        workspace_id, group_id = (
+            self._ticket_routing_ids()
+        )
 
         payload = {
             "email":
                 self.requester_email,
+
             "subject":
                 _ticket_subject(
                     finding.solution
                 ),
+
             "description":
                 _ticket_description(
                     finding
                 ),
+
             "urgency":
                 MEDIUM,
+
             "impact":
                 MEDIUM,
+
             "priority":
                 MEDIUM,
+
             "status":
                 2,
+
             "workspace_id":
                 workspace_id,
+
             "group_id":
                 group_id,
+
             "category":
                 TICKET_CATEGORY,
+
             "sub_category":
                 TICKET_SUB_CATEGORY,
+
             "tags": [
                 "rapid7-insightvm",
                 tag,
@@ -237,18 +217,13 @@ class FreshserviceClient:
 
         response = self.http.request_json(
             "POST",
-            (
-                f"{self.base_url}"
-                "/tickets"
-            ),
+            f"{self.base_url}/tickets",
             json_body=payload,
             retryable=False,
         )
 
         ticket = (
-            response.get(
-                "ticket"
-            )
+            response.get("ticket")
             if isinstance(
                 response,
                 dict,
@@ -261,12 +236,11 @@ class FreshserviceClient:
                 ticket,
                 dict,
             )
-            or "id"
-            not in ticket
+            or "id" not in ticket
         ):
             raise ApiError(
-                "Freshservice ticket creation "
-                "returned an invalid response"
+                "Freshservice ticket creation returned "
+                "an invalid response"
             )
 
         return ticket
@@ -307,27 +281,18 @@ class FreshserviceClient:
         resource_key: str,
         name: str,
         *,
-        params: dict[
-            str,
-            Any,
-        ]
-        | None = None,
+        params: dict[str, Any] | None = None,
     ) -> int:
-        resources = (
-            self._list_resources(
-                path,
-                resource_key,
-                params=params,
-            )
+        resources = self._list_resources(
+            path,
+            resource_key,
+            params=params,
         )
 
         matches = [
             resource
-            for resource
-            in resources
-            if resource.get(
-                "name"
-            )
+            for resource in resources
+            if resource.get("name")
             == name
         ]
 
@@ -394,14 +359,8 @@ class FreshserviceClient:
         path: str,
         resource_key: str,
         *,
-        params: dict[
-            str,
-            Any,
-        ]
-        | None = None,
-    ) -> list[
-        dict[str, Any]
-    ]:
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         page = 1
 
         resources: list[
@@ -409,24 +368,19 @@ class FreshserviceClient:
         ] = []
 
         while True:
-            response = (
-                self.http.request_json(
-                    "GET",
-                    (
-                        f"{self.base_url}"
-                        f"{path}"
+            response = self.http.request_json(
+                "GET",
+                f"{self.base_url}{path}",
+                params={
+                    **(
+                        params
+                        or {}
                     ),
-                    params={
-                        **(
-                            params
-                            or {}
-                        ),
-                        "page":
-                            page,
-                        "per_page":
-                            RESOURCE_PAGE_SIZE,
-                    },
-                )
+                    "page":
+                        page,
+                    "per_page":
+                        RESOURCE_PAGE_SIZE,
+                },
             )
 
             batch = (
@@ -450,21 +404,23 @@ class FreshserviceClient:
                         resource,
                         dict,
                     )
-                    for resource
-                    in batch
+                    for resource in batch
                 )
             ):
                 raise ApiError(
                     "Freshservice "
-                    f"{resource_key} list "
-                    "returned an invalid response"
+                    f"{resource_key} list returned "
+                    "an invalid response"
                 )
 
             resources.extend(
                 batch
             )
 
-            if len(batch) < RESOURCE_PAGE_SIZE:
+            if (
+                len(batch)
+                < RESOURCE_PAGE_SIZE
+            ):
                 return resources
 
             page += 1
@@ -473,6 +429,11 @@ class FreshserviceClient:
 def finding_tag(
     finding: Finding,
 ) -> str:
+    """
+    Build a stable tag used to prevent duplicate open
+    Freshservice tickets for the same Rapid7 remediation.
+    """
+
     if finding.solution_id:
         identity = (
             f"{finding.solution_id}"
@@ -493,9 +454,7 @@ def finding_tag(
         identity.encode(
             "utf-8"
         )
-    ).hexdigest()[
-        :24
-    ]
+    ).hexdigest()[:24]
 
     return (
         "rapid7-remediation-"
@@ -515,6 +474,13 @@ def _ticket_subject(
 def _ticket_description(
     finding: Finding,
 ) -> str:
+    """
+    Build the Freshservice HTML description.
+
+    Rapid7-controlled values are HTML-escaped before being
+    embedded in the ticket.
+    """
+
     assets = (
         finding.affected_assets
         or tuple(
@@ -539,8 +505,7 @@ def _ticket_description(
             f"<td>{html.escape(finding.fix_details)}</td>"
             "</tr>"
         )
-        for asset
-        in assets
+        for asset in assets
     )
 
     remediation_section = (
@@ -579,11 +544,9 @@ def _ticket_description(
                     f"<td>{html.escape(proof.vulnerability_id)}</td>"
                     f"<td>{html.escape(proof.check_id)}</td>"
                     f"<td>{html.escape(proof.status)}</td>"
-                    "<td>"
-                    "<pre>"
+                    "<td><pre>"
                     f"{html.escape(proof.proof)}"
-                    "</pre>"
-                    "</td>"
+                    "</pre></td>"
                     "</tr>"
                 )
                 for proof
