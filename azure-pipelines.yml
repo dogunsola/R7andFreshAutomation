@@ -33,19 +33,14 @@ jobs:
           python3 --version
           which python3
 
-          echo "Creating virtual environment"
           python3 -m venv .venv
 
           echo "Virtual environment Python:"
           .venv/bin/python --version
 
-          echo "Upgrading pip"
           .venv/bin/python -m pip install --upgrade pip
-
-          echo "Installing project dependencies"
           .venv/bin/python -m pip install -e ".[dev,azure]"
 
-          echo "Installed pytest:"
           .venv/bin/python -m pytest --version
         displayName: Install dependencies
 
@@ -55,6 +50,12 @@ jobs:
 
           echo "Running tests with:"
           .venv/bin/python --version
+
+          .venv/bin/python -m py_compile \
+            src/rapid7_freshservice_sync/freshservice.py \
+            src/rapid7_freshservice_sync/rapid7.py \
+            src/rapid7_freshservice_sync/transform.py \
+            src/rapid7_freshservice_sync/cli.py
 
           .venv/bin/python -m pytest
         displayName: Run tests
@@ -74,9 +75,12 @@ jobs:
           RAPID7_CONSOLE_URL: $(Rapid7-Console-URL)
           RAPID7_CONSOLE_USERNAME: $(Rapid7-Console-Username)
           RAPID7_CONSOLE_PASSWORD: $(Rapid7-Console-Password)
+
           FRESHSERVICE_DOMAIN: $(Freshservice-Domain)
           FRESHSERVICE_API_KEY: $(Freshservice-API-Key)
           FRESHSERVICE_REQUESTER_EMAIL: $(Freshservice-Requester-Email)
+          FRESHSERVICE_WORKSPACE_ID: $(Freshservice-Workspace-ID)
+          FRESHSERVICE_GROUP_ID: $(Freshservice-Group-ID)
 
       - task: PublishPipelineArtifact@1
         displayName: Publish CSV output
