@@ -1,4 +1,5 @@
 import json
+import logging
 import ssl
 import time
 from typing import Any
@@ -7,11 +8,15 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
+LOG = logging.getLogger(__name__)
+
+
 class ApiError(RuntimeError):
     pass
 
 
 MAX_RESPONSE_BYTES = 250 * 1024 * 1024
+MAX_RETRY_DELAY_SECONDS = 60
 
 
 class HttpClient:
@@ -21,6 +26,15 @@ class HttpClient:
         retries: int = 5,
         allowed_hosts: set[str] | None = None,
     ) -> None:
+        if (
+            isinstance(retries, bool)
+            or not isinstance(retries, int)
+            or retries < 0
+        ):
+            raise ValueError(
+                "HTTP retry count must be a non-negative integer"
+            )
+
         self.headers = headers or {}
         self.retries = retries
         self.allowed_hosts = allowed_hosts
@@ -41,11 +55,44 @@ class HttpClient:
         headers: dict[str, str] | None = None,
         timeout: int = 120,
         retryable: bool = True,
+        retries: int | None = None,
     ) -> Any:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int)
+            or timeout <= 0
+        ):
+            raise ValueError(
+                "HTTP timeout must be a positive integer"
+            )
+
+        if (
+            retries is not None
+            and (
+                isinstance(retries, bool)
+                or not isinstance(retries, int)
+                or retries < 0
+            )
+        ):
+            raise ValueError(
+                "HTTP retry count must be a non-negative integer"
+            )
+
         if params:
+            query_string = urlencode(
+                params
+            )
+
+            separator = (
+                "&"
+                if "?" in url
+                else "?"
+            )
+
             url = (
-                f"{url}?"
-                f"{urlencode(params)}"
+                f"{url}"
+                f"{separator}"
+                f"{query_string}"
             )
 
         self._validate_url(
@@ -61,6 +108,11 @@ class HttpClient:
         }
 
         if json_body is not None:
+            if body is not None:
+                raise ValueError(
+                    "Specify either json_body or body, not both"
+                )
+
             body = json.dumps(
                 json_body
             ).encode(
@@ -78,15 +130,26 @@ class HttpClient:
             method=method,
         )
 
-        max_retries = (
-            self.retries
-            if retryable
-            else 0
+        if not retryable:
+            max_retries = 0
+        elif retries is not None:
+            max_retries = retries
+        else:
+            max_retries = self.retries
+
+        total_attempts = (
+            max_retries + 1
         )
 
         for attempt in range(
-            max_retries + 1
+            total_attempts
         ):
+            attempt_number = (
+                attempt + 1
+            )
+
+            started = time.monotonic()
+
             try:
                 with urlopen(
                     request,
@@ -96,6 +159,20 @@ class HttpClient:
                     raw = response.read(
                         MAX_RESPONSE_BYTES + 1
                     )
+
+                duration = (
+                    time.monotonic()
+                    - started
+                )
+
+                LOG.debug(
+                    "%s request completed in %.2f seconds "
+                    "on attempt %s/%s",
+                    method,
+                    duration,
+                    attempt_number,
+                    total_attempts,
+                )
 
                 if len(raw) > MAX_RESPONSE_BYTES:
                     raise ApiError(
@@ -114,6 +191,11 @@ class HttpClient:
                     ) from exc
 
             except HTTPError as exc:
+                duration = (
+                    time.monotonic()
+                    - started
+                )
+
                 response_body = (
                     exc.read()
                     .decode(
@@ -122,73 +204,103 @@ class HttpClient:
                     )[:1000]
                 )
 
-                if (
+                retryable_status = (
                     exc.code
-                    not in {
+                    in {
                         429,
                         500,
                         502,
                         503,
                         504,
                     }
+                )
+
+                if (
+                    not retryable_status
                     or attempt >= max_retries
                 ):
                     raise ApiError(
                         f"{method} {url} returned "
-                        f"{exc.code}: {response_body}"
+                        f"{exc.code} after "
+                        f"{duration:.2f} seconds: "
+                        f"{response_body}"
                     ) from exc
 
-                retry_after = (
+                delay = self._retry_delay(
+                    attempt,
                     exc.headers.get(
                         "Retry-After"
-                    )
+                    ),
                 )
 
-                if retry_after:
-                    try:
-                        delay = min(
-                            max(
-                                float(
-                                    retry_after
-                                ),
-                                0,
-                            ),
-                            60,
-                        )
-                    except ValueError:
-                        delay = min(
-                            2 ** attempt,
-                            60,
-                        )
-                else:
-                    delay = min(
-                        2 ** attempt,
-                        60,
-                    )
+                LOG.warning(
+                    "%s request returned HTTP %s after "
+                    "%.2f seconds on attempt %s/%s. "
+                    "Retrying in %.1f seconds.",
+                    method,
+                    exc.code,
+                    duration,
+                    attempt_number,
+                    total_attempts,
+                    delay,
+                )
 
             except TimeoutError as exc:
+                duration = (
+                    time.monotonic()
+                    - started
+                )
+
                 if attempt >= max_retries:
                     raise ApiError(
-                        f"{method} {url} timed out "
-                        f"after {timeout} seconds "
-                        f"and {attempt + 1} attempts"
+                        f"{method} {url} timed out after "
+                        f"{duration:.2f} seconds on attempt "
+                        f"{attempt_number}/{total_attempts}"
                     ) from exc
 
-                delay = min(
-                    2 ** attempt,
-                    60,
+                delay = self._retry_delay(
+                    attempt
+                )
+
+                LOG.warning(
+                    "%s request timed out after %.2f seconds "
+                    "on attempt %s/%s. Retrying in "
+                    "%.1f seconds.",
+                    method,
+                    duration,
+                    attempt_number,
+                    total_attempts,
+                    delay,
                 )
 
             except URLError as exc:
+                duration = (
+                    time.monotonic()
+                    - started
+                )
+
                 if attempt >= max_retries:
                     raise ApiError(
-                        f"{method} {url} failed: "
+                        f"{method} {url} failed after "
+                        f"{duration:.2f} seconds on attempt "
+                        f"{attempt_number}/{total_attempts}: "
                         f"{exc.reason}"
                     ) from exc
 
-                delay = min(
-                    2 ** attempt,
-                    60,
+                delay = self._retry_delay(
+                    attempt
+                )
+
+                LOG.warning(
+                    "%s request failed after %.2f seconds "
+                    "on attempt %s/%s: %s. Retrying in "
+                    "%.1f seconds.",
+                    method,
+                    duration,
+                    attempt_number,
+                    total_attempts,
+                    exc.reason,
+                    delay,
                 )
 
             time.sleep(
@@ -197,6 +309,32 @@ class HttpClient:
 
         raise AssertionError(
             "unreachable"
+        )
+
+    @staticmethod
+    def _retry_delay(
+        attempt: int,
+        retry_after: str | None = None,
+    ) -> float:
+        if retry_after:
+            try:
+                return min(
+                    max(
+                        float(
+                            retry_after
+                        ),
+                        0,
+                    ),
+                    MAX_RETRY_DELAY_SECONDS,
+                )
+            except ValueError:
+                pass
+
+        return float(
+            min(
+                2 ** attempt,
+                MAX_RETRY_DELAY_SECONDS,
+            )
         )
 
     def _validate_url(
