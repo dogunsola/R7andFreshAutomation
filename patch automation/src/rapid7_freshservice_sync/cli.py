@@ -25,9 +25,7 @@ def positive_int(
     value: str,
 ) -> int:
     try:
-        parsed = int(
-            value
-        )
+        parsed = int(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
             "must be a positive integer"
@@ -41,17 +39,22 @@ def positive_int(
     return parsed
 
 
-def required_positive_int(
-    value: str,
-    label: str,
-) -> int:
+def optional_env_positive_int(
+    variable_name: str,
+) -> int | None:
+    value = os.environ.get(
+        variable_name,
+        "",
+    ).strip()
+
+    if not value:
+        return None
+
     try:
-        return positive_int(
-            value
-        )
+        return positive_int(value)
     except argparse.ArgumentTypeError as exc:
         raise SystemExit(
-            f"{label} must be a positive integer"
+            f"{variable_name} must be a positive integer"
         ) from exc
 
 
@@ -170,8 +173,32 @@ def parse_args() -> argparse.Namespace:
             "",
         ),
         help=(
-            "Freshservice HTTPS domain, "
-            "e.g. https://company.freshservice.com"
+            "Freshservice HTTPS origin, for example "
+            "https://alterna.freshservice.com"
+        ),
+    )
+
+    parser.add_argument(
+        "--freshservice-workspace-id",
+        type=positive_int,
+        default=optional_env_positive_int(
+            "FRESHSERVICE_WORKSPACE_ID"
+        ),
+        help=(
+            "Numeric Freshservice workspace ID; defaults to "
+            "FRESHSERVICE_WORKSPACE_ID"
+        ),
+    )
+
+    parser.add_argument(
+        "--freshservice-group-id",
+        type=positive_int,
+        default=optional_env_positive_int(
+            "FRESHSERVICE_GROUP_ID"
+        ),
+        help=(
+            "Numeric Freshservice group ID; defaults to "
+            "FRESHSERVICE_GROUP_ID"
         ),
     )
 
@@ -182,8 +209,8 @@ def parse_args() -> argparse.Namespace:
             "",
         ),
         help=(
-            "Security Console HTTPS origin, "
-            "e.g. https://console:3780"
+            "Security Console HTTPS origin, for example "
+            "https://console:3780"
         ),
     )
 
@@ -378,10 +405,22 @@ def main() -> None:
                 "is required to create tickets"
             )
 
+        if args.freshservice_workspace_id is None:
+            raise SystemExit(
+                "--freshservice-workspace-id or "
+                "FRESHSERVICE_WORKSPACE_ID is required "
+                "to create tickets"
+            )
+
+        if args.freshservice_group_id is None:
+            raise SystemExit(
+                "--freshservice-group-id or "
+                "FRESHSERVICE_GROUP_ID is required "
+                "to create tickets"
+            )
+
         freshservice = FreshserviceClient(
-            domain=(
-                args.freshservice_domain
-            ),
+            domain=args.freshservice_domain,
             api_key=secrets.get_required(
                 args.freshservice_api_key_secret
                 or default_secret_name(
@@ -397,6 +436,12 @@ def main() -> None:
                     "FRESHSERVICE_REQUESTER_EMAIL",
                     "freshservice-requester-email",
                 )
+            ),
+            workspace_id=(
+                args.freshservice_workspace_id
+            ),
+            group_id=(
+                args.freshservice_group_id
             ),
         )
 
@@ -422,7 +467,6 @@ def main() -> None:
                     ),
                     finding.solution,
                 )
-
             else:
                 created += 1
 
@@ -442,7 +486,6 @@ def main() -> None:
             created,
             skipped,
         )
-
     else:
         LOG.info(
             "Dry run complete; use --create-tickets "
@@ -460,7 +503,6 @@ def main() -> None:
                 "consider chmod 600",
                 args.output,
             )
-
     except OSError:
         pass
 
