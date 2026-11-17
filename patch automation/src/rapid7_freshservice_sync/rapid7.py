@@ -1,5 +1,6 @@
 import base64
 import logging
+import time
 from collections.abc import Iterable, Iterator
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -8,6 +9,11 @@ from .http import HttpClient
 
 
 LOG = logging.getLogger(__name__)
+
+DEFAULT_RAPID7_TIMEOUT_SECONDS = 300
+ASSET_SEARCH_TIMEOUT_SECONDS = 300
+ASSET_SEARCH_RETRIES = 2
+PROGRESS_INTERVAL = 100
 
 
 class Rapid7SolutionClient:
@@ -33,7 +39,9 @@ class Rapid7SolutionClient:
                 "Rapid7 asset group must not be empty"
             )
 
-        parsed = urlparse(console_url)
+        parsed = urlparse(
+            console_url
+        )
 
         if (
             parsed.scheme != "https"
@@ -62,20 +70,28 @@ class Rapid7SolutionClient:
 
         self.page_size = page_size
         self.asset_group = asset_group
-        self.base_url = console_url.rstrip("/") + "/api/3"
+        self.base_url = (
+            console_url.rstrip("/")
+            + "/api/3"
+        )
 
         token = base64.b64encode(
             f"{username}:{password}".encode()
-        ).decode("ascii")
+        ).decode(
+            "ascii"
+        )
 
-        self.http = http or HttpClient(
-            headers={
-                "Authorization": f"Basic {token}",
-                "Accept": "application/json",
-            },
-            allowed_hosts={
-                parsed.hostname,
-            },
+        self.http = (
+            http
+            or HttpClient(
+                headers={
+                    "Authorization": f"Basic {token}",
+                    "Accept": "application/json",
+                },
+                allowed_hosts={
+                    parsed.hostname,
+                },
+            )
         )
 
         self._solutions: dict[
@@ -102,14 +118,6 @@ class Rapid7SolutionClient:
         self,
         vulnerability_id: str,
     ) -> dict[str, Any]:
-        """
-        Retrieve and cache one vulnerability definition.
-
-        This avoids downloading the complete Rapid7 vulnerability catalog
-        when only a smaller set of vulnerabilities is active on the scoped
-        assets.
-        """
-
         vulnerability_id = str(
             vulnerability_id
         ).strip()
@@ -135,13 +143,17 @@ class Rapid7SolutionClient:
                 f"{self.base_url}/vulnerabilities/"
                 f"{encoded_vulnerability_id}"
             ),
-            timeout=300,
+            timeout=DEFAULT_RAPID7_TIMEOUT_SECONDS,
         )
 
-        if not isinstance(payload, dict):
+        if not isinstance(
+            payload,
+            dict,
+        ):
             raise ValueError(
-                "Rapid7 returned an invalid vulnerability response for "
-                f"{vulnerability_id!r}; expected an object, received "
+                "Rapid7 returned an invalid vulnerability "
+                f"response for {vulnerability_id!r}; "
+                "expected an object, received "
                 f"{type(payload).__name__}"
             )
 
@@ -163,32 +175,35 @@ class Rapid7SolutionClient:
         self,
         vulnerability_ids: Iterable[str],
     ) -> Iterator[dict[str, Any]]:
-        """
-        Retrieve only the requested vulnerability definitions.
-
-        The method preserves the original filtering requirements:
-
-        - Critical and Severe vulnerabilities only.
-        - Exclude vulnerabilities categorized as Microsoft Patch.
-        """
-
         normalized_ids = sorted(
             {
-                str(vulnerability_id).strip()
-                for vulnerability_id in vulnerability_ids
-                if str(vulnerability_id).strip()
+                str(
+                    vulnerability_id
+                ).strip()
+                for vulnerability_id
+                in vulnerability_ids
+                if str(
+                    vulnerability_id
+                ).strip()
             }
         )
 
-        total = len(normalized_ids)
+        total = len(
+            normalized_ids
+        )
 
         for index, vulnerability_id in enumerate(
             normalized_ids,
             start=1,
         ):
-            if index == 1 or index % 100 == 0 or index == total:
+            if (
+                index == 1
+                or index % PROGRESS_INTERVAL == 0
+                or index == total
+            ):
                 LOG.info(
-                    "Downloading Rapid7 vulnerability details: %s/%s",
+                    "Downloading Rapid7 vulnerability "
+                    "details: %s/%s",
                     index,
                     total,
                 )
@@ -222,9 +237,12 @@ class Rapid7SolutionClient:
                 categories = []
 
             if any(
-                str(category).strip().lower()
+                str(
+                    category
+                ).strip().lower()
                 == "microsoft patch"
-                for category in categories
+                for category
+                in categories
             ):
                 continue
 
@@ -234,14 +252,6 @@ class Rapid7SolutionClient:
         self,
         vulnerability_id: str,
     ) -> list[dict[str, Any]]:
-        """
-        Retrieve and cache Rapid7 remediation solutions.
-
-        If Rapid7 returns a valid response without a resources collection,
-        return an empty list. The transformation layer can then fall back
-        to remediation details in the vulnerability catalog.
-        """
-
         if vulnerability_id in self._vulnerabilities:
             return self._vulnerabilities[
                 vulnerability_id
@@ -258,16 +268,23 @@ class Rapid7SolutionClient:
                 f"{self.base_url}/vulnerabilities/"
                 f"{encoded_vulnerability_id}/solutions"
             ),
+            timeout=DEFAULT_RAPID7_TIMEOUT_SECONDS,
         )
 
-        if not isinstance(payload, dict):
+        if not isinstance(
+            payload,
+            dict,
+        ):
             raise ValueError(
                 "Rapid7 returned an invalid vulnerability-solutions "
                 f"response for vulnerability {vulnerability_id!r}; "
-                f"expected an object, received {type(payload).__name__}"
+                "expected an object, received "
+                f"{type(payload).__name__}"
             )
 
-        resources = payload.get("resources")
+        resources = payload.get(
+            "resources"
+        )
 
         if resources is None:
             LOG.warning(
@@ -277,8 +294,11 @@ class Rapid7SolutionClient:
                 "as a fallback.",
                 vulnerability_id,
                 sorted(
-                    str(key)
-                    for key in payload
+                    str(
+                        key
+                    )
+                    for key
+                    in payload
                 ),
             )
 
@@ -288,7 +308,10 @@ class Rapid7SolutionClient:
 
             return []
 
-        if not isinstance(resources, list):
+        if not isinstance(
+            resources,
+            list,
+        ):
             raise ValueError(
                 "Rapid7 returned an invalid 'resources' value from the "
                 "vulnerability-solutions endpoint for vulnerability "
@@ -302,7 +325,10 @@ class Rapid7SolutionClient:
 
         for solution_id in resources:
             if (
-                not isinstance(solution_id, str)
+                not isinstance(
+                    solution_id,
+                    str,
+                )
                 or not solution_id.strip()
             ):
                 raise ValueError(
@@ -321,13 +347,18 @@ class Rapid7SolutionClient:
                         f"{self.base_url}/solutions/"
                         f"{encoded_solution_id}"
                     ),
+                    timeout=DEFAULT_RAPID7_TIMEOUT_SECONDS,
                 )
 
-                if not isinstance(solution, dict):
+                if not isinstance(
+                    solution,
+                    dict,
+                ):
                     raise ValueError(
                         "Rapid7 returned an invalid solution for "
-                        f"solution ID {solution_id!r}; expected an "
-                        f"object, received {type(solution).__name__}"
+                        f"solution ID {solution_id!r}; "
+                        "expected an object, received "
+                        f"{type(solution).__name__}"
                     )
 
                 self._solutions[
@@ -355,7 +386,9 @@ class Rapid7SolutionClient:
         vulnerability_id: str,
     ) -> list[dict[str, Any]]:
         key = (
-            str(asset_id),
+            str(
+                asset_id
+            ),
             vulnerability_id,
         )
 
@@ -377,9 +410,13 @@ class Rapid7SolutionClient:
                     f"{encoded_asset_id}/vulnerabilities/"
                     f"{encoded_vulnerability_id}"
                 ),
+                timeout=DEFAULT_RAPID7_TIMEOUT_SECONDS,
             )
 
-            if not isinstance(payload, dict):
+            if not isinstance(
+                payload,
+                dict,
+            ):
                 raise ValueError(
                     "Rapid7 returned an invalid asset vulnerability"
                 )
@@ -389,9 +426,13 @@ class Rapid7SolutionClient:
                 [],
             )
 
-            if not isinstance(results, list):
+            if not isinstance(
+                results,
+                list,
+            ):
                 raise ValueError(
-                    "Rapid7 returned invalid asset vulnerability results"
+                    "Rapid7 returned invalid asset "
+                    "vulnerability results"
                 )
 
             proofs: list[
@@ -399,13 +440,19 @@ class Rapid7SolutionClient:
             ] = []
 
             for result in results:
-                if not isinstance(result, dict):
+                if not isinstance(
+                    result,
+                    dict,
+                ):
                     raise ValueError(
-                        "Rapid7 returned an invalid vulnerability result"
+                        "Rapid7 returned an invalid "
+                        "vulnerability result"
                     )
 
                 status = str(
-                    result.get("status")
+                    result.get(
+                        "status"
+                    )
                     or ""
                 )
 
@@ -415,13 +462,19 @@ class Rapid7SolutionClient:
                     continue
 
                 proof = (
-                    result.get("proof")
+                    result.get(
+                        "proof"
+                    )
                     or ""
                 )
 
-                if not isinstance(proof, str):
+                if not isinstance(
+                    proof,
+                    str,
+                ):
                     raise ValueError(
-                        "Rapid7 returned invalid vulnerability proof text"
+                        "Rapid7 returned invalid "
+                        "vulnerability proof text"
                     )
 
                 if not proof.strip():
@@ -457,21 +510,39 @@ class Rapid7Client(Rapid7SolutionClient):
         method: str = "GET",
         body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        timeout: int = DEFAULT_RAPID7_TIMEOUT_SECONDS,
+        retries: int | None = None,
     ) -> Iterator[dict[str, Any]]:
         page = 0
 
         while True:
+            page_started = time.monotonic()
+
+            LOG.info(
+                "Requesting Rapid7 %s page %s",
+                path,
+                page + 1,
+            )
+
             kwargs: dict[
                 str,
                 Any,
             ] = {
                 "params": {
-                    **(params or {}),
+                    **(
+                        params
+                        or {}
+                    ),
                     "page": page,
                     "size": self.page_size,
                 },
-                "timeout": 300,
+                "timeout": timeout,
             }
+
+            if retries is not None:
+                kwargs[
+                    "retries"
+                ] = retries
 
             if body is not None:
                 kwargs[
@@ -480,11 +551,22 @@ class Rapid7Client(Rapid7SolutionClient):
 
             payload = self.http.request_json(
                 method,
-                f"{self.base_url}{path}",
+                (
+                    f"{self.base_url}"
+                    f"{path}"
+                ),
                 **kwargs,
             )
 
-            if not isinstance(payload, dict):
+            page_duration = (
+                time.monotonic()
+                - page_started
+            )
+
+            if not isinstance(
+                payload,
+                dict,
+            ):
                 raise ValueError(
                     "Rapid7 returned an invalid paginated response for "
                     f"{path!r}"
@@ -494,14 +576,31 @@ class Rapid7Client(Rapid7SolutionClient):
                 "resources"
             )
 
-            if not isinstance(resources, list):
+            if not isinstance(
+                resources,
+                list,
+            ):
                 raise ValueError(
                     "Rapid7 returned an invalid resources collection for "
                     f"{path!r}"
                 )
 
+            LOG.info(
+                "Rapid7 %s page %s returned %s resources "
+                "in %.2f seconds",
+                path,
+                page + 1,
+                len(
+                    resources
+                ),
+                page_duration,
+            )
+
             for resource in resources:
-                if not isinstance(resource, dict):
+                if not isinstance(
+                    resource,
+                    dict,
+                ):
                     raise ValueError(
                         "Rapid7 returned an invalid resource for "
                         f"{path!r}"
@@ -513,10 +612,13 @@ class Rapid7Client(Rapid7SolutionClient):
                 "page"
             )
 
-            if not isinstance(page_data, dict):
+            if not isinstance(
+                page_data,
+                dict,
+            ):
                 raise ValueError(
-                    "Rapid7 returned invalid pagination information for "
-                    f"{path!r}"
+                    "Rapid7 returned invalid pagination "
+                    f"information for {path!r}"
                 )
 
             total_pages = page_data.get(
@@ -527,6 +629,7 @@ class Rapid7Client(Rapid7SolutionClient):
                 total_pages_int = int(
                     total_pages
                 )
+
             except (
                 TypeError,
                 ValueError,
@@ -544,13 +647,6 @@ class Rapid7Client(Rapid7SolutionClient):
     def iter_vulnerability_catalog(
         self,
     ) -> Iterator[dict[str, Any]]:
-        """
-        Retained for compatibility and testing.
-
-        The optimized production workflow uses iter_vulnerabilities()
-        instead of downloading the complete catalog.
-        """
-
         for vulnerability in self._pages(
             "/vulnerabilities"
         ):
@@ -579,9 +675,12 @@ class Rapid7Client(Rapid7SolutionClient):
                 categories = []
 
             if any(
-                str(category).strip().lower()
+                str(
+                    category
+                ).strip().lower()
                 == "microsoft patch"
-                for category in categories
+                for category
+                in categories
             ):
                 continue
 
@@ -590,6 +689,11 @@ class Rapid7Client(Rapid7SolutionClient):
     def iter_affected_assets(
         self,
     ) -> Iterator[dict[str, Any]]:
+        LOG.info(
+            "Locating Rapid7 asset group %r",
+            self.asset_group,
+        )
+
         groups = [
             group
             for group in self._pages(
@@ -628,9 +732,13 @@ class Rapid7Client(Rapid7SolutionClient):
                 f"{self.base_url}/asset_groups/"
                 f"{group_id}/assets"
             ),
+            timeout=DEFAULT_RAPID7_TIMEOUT_SECONDS,
         )
 
-        if not isinstance(membership, dict):
+        if not isinstance(
+            membership,
+            dict,
+        ):
             raise ValueError(
                 "Rapid7 returned invalid asset group membership data"
             )
@@ -649,9 +757,20 @@ class Rapid7Client(Rapid7SolutionClient):
             )
 
         member_ids = {
-            str(asset_id)
-            for asset_id in membership_resources
+            str(
+                asset_id
+            )
+            for asset_id
+            in membership_resources
         }
+
+        LOG.info(
+            "Rapid7 asset group %r contains %s asset IDs",
+            self.asset_group,
+            len(
+                member_ids
+            ),
+        )
 
         if not member_ids:
             return
@@ -667,29 +786,86 @@ class Rapid7Client(Rapid7SolutionClient):
             ],
         }
 
-        for asset in self._pages(
-            "/assets/search",
-            method="POST",
-            body=criteria,
+        LOG.info(
+            "Searching Rapid7 for assets scanned "
+            "within the last 7 days"
+        )
+
+        recent_assets = list(
+            self._pages(
+                "/assets/search",
+                method="POST",
+                body=criteria,
+                timeout=ASSET_SEARCH_TIMEOUT_SECONDS,
+                retries=ASSET_SEARCH_RETRIES,
+            )
+        )
+
+        LOG.info(
+            "Rapid7 recent-asset search returned "
+            "%s total assets",
+            len(
+                recent_assets
+            ),
+        )
+
+        scoped_assets = [
+            asset
+            for asset in recent_assets
+            if str(
+                asset.get(
+                    "id"
+                )
+            )
+            in member_ids
+        ]
+
+        LOG.info(
+            "%s recently scanned assets belong to "
+            "Rapid7 asset group %r",
+            len(
+                scoped_assets
+            ),
+            self.asset_group,
+        )
+
+        total_scoped_assets = len(
+            scoped_assets
+        )
+
+        for asset_index, asset in enumerate(
+            scoped_assets,
+            start=1,
         ):
+            if (
+                asset_index == 1
+                or asset_index % PROGRESS_INTERVAL == 0
+                or asset_index == total_scoped_assets
+            ):
+                LOG.info(
+                    "Downloading Rapid7 asset "
+                    "vulnerabilities: %s/%s",
+                    asset_index,
+                    total_scoped_assets,
+                )
+
             asset_id_value = asset.get(
                 "id"
             )
 
-            if str(
-                asset_id_value
-            ) not in member_ids:
-                continue
-
             encoded_asset_id = quote(
-                str(asset_id_value),
+                str(
+                    asset_id_value
+                ),
                 safe="",
             )
 
             findings = [
                 {
                     "vulnerability_id": str(
-                        finding["id"]
+                        finding[
+                            "id"
+                        ]
                     ),
                 }
                 for finding in self._pages(
@@ -699,9 +875,14 @@ class Rapid7Client(Rapid7SolutionClient):
                     )
                 )
                 if (
-                    finding.get("status")
+                    finding.get(
+                        "status"
+                    )
                     == "vulnerable"
-                    and finding.get("id") is not None
+                    and finding.get(
+                        "id"
+                    )
+                    is not None
                 )
             ]
 
