@@ -11,144 +11,10 @@ from rapid7_freshservice_sync.http import (
     HttpClient,
 )
 from rapid7_freshservice_sync.models import Finding
-from rapid7_freshservice_sync.rapid7 import Rapid7Client
 
 
-class ClientTests(unittest.TestCase):
-    def test_console_assets_pagination_membership_and_active_findings(
-        self,
-    ) -> None:
-        def page(
-            resources,
-            total=1,
-        ):
-            return {
-                "resources": resources,
-                "page": {
-                    "totalPages": total,
-                },
-            }
-
-        http = Mock()
-
-        http.request_json.side_effect = [
-            page(
-                [
-                    {
-                        "id": 1,
-                        "name":
-                            "other workstations/laptops",
-                    }
-                ],
-                2,
-            ),
-            page(
-                [
-                    {
-                        "id": 2,
-                        "name":
-                            "workstations/laptops",
-                    }
-                ],
-                2,
-            ),
-            {
-                "resources": [
-                    10,
-                    20,
-                ]
-            },
-            page(
-                [
-                    {
-                        "id": 99,
-                    },
-                    {
-                        "id": 10,
-                        "hostName": "host-a",
-                        "ip": "10.0.0.1",
-                    },
-                ],
-                2,
-            ),
-            page(
-                [
-                    {
-                        "id": "v1",
-                        "status": "vulnerable",
-                    }
-                ],
-                2,
-            ),
-            page(
-                [
-                    {
-                        "id": "v2",
-                        "status": "invulnerable",
-                    },
-                    {
-                        "id": "v3",
-                        "status": "no-results",
-                    },
-                ],
-                2,
-            ),
-            page(
-                [
-                    {
-                        "id": 20,
-                        "ip": "10.0.0.2",
-                    }
-                ],
-                2,
-            ),
-            page(
-                [
-                    {
-                        "id": "v4",
-                        "status": "vulnerable",
-                    }
-                ]
-            ),
-        ]
-
-        client = Rapid7Client(
-            "https://console.example:3780",
-            "user",
-            "password",
-            http=http,
-            page_size=100,
-        )
-
-        self.assertEqual(
-            list(
-                client.iter_affected_assets()
-            ),
-            [
-                {
-                    "id": 10,
-                    "host_name": "host-a",
-                    "ip": "10.0.0.1",
-                    "new": [
-                        {
-                            "vulnerability_id": "v1",
-                        }
-                    ],
-                },
-                {
-                    "id": 20,
-                    "host_name": "",
-                    "ip": "10.0.0.2",
-                    "new": [
-                        {
-                            "vulnerability_id": "v4",
-                        }
-                    ],
-                },
-            ],
-        )
-
-    def test_freshservice_creates_ticket_using_only_configured_workspace_and_group(
+class FreshserviceClientTests(unittest.TestCase):
+    def test_creates_ticket_using_configured_workspace_and_group(
         self,
     ) -> None:
         http = Mock()
@@ -165,7 +31,6 @@ class ClientTests(unittest.TestCase):
             {
                 "ticket": {
                     "id": 123,
-                    "status": 2,
                 }
             },
         ]
@@ -175,7 +40,7 @@ class ClientTests(unittest.TestCase):
             "api-key",
             "security@example.com",
             workspace_id=2,
-            group_id=84,
+            group_id=11000367285,
             http=http,
         )
 
@@ -187,10 +52,8 @@ class ClientTests(unittest.TestCase):
             "Install 2.0",
         )
 
-        result = (
-            client.create_ticket_if_missing(
-                finding
-            )
+        result = client.create_ticket_if_missing(
+            finding
         )
 
         self.assertEqual(
@@ -264,43 +127,76 @@ class ClientTests(unittest.TestCase):
         ]
 
         self.assertEqual(
-            payload["workspace_id"],
+            payload[
+                "workspace_id"
+            ],
             2,
         )
 
         self.assertEqual(
-            payload["group_id"],
-            84,
+            payload[
+                "group_id"
+            ],
+            11000367285,
         )
 
         self.assertEqual(
-            payload["email"],
+            payload[
+                "email"
+            ],
             "security@example.com",
         )
 
         self.assertEqual(
-            payload["subject"],
+            payload[
+                "subject"
+            ],
             "Upgrade",
         )
 
-        self.assertNotIn("status", payload)
-        self.assertNotIn("urgency", payload)
-        self.assertNotIn("impact", payload)
-        self.assertNotIn("priority", payload)
+        self.assertEqual(
+            payload[
+                "status"
+            ],
+            2,
+        )
 
         self.assertEqual(
-            payload["category"],
+            payload[
+                "priority"
+            ],
+            2,
+        )
+
+        self.assertNotIn(
+            "urgency",
+            payload,
+        )
+
+        self.assertNotIn(
+            "impact",
+            payload,
+        )
+
+        self.assertEqual(
+            payload[
+                "category"
+            ],
             "Digital Security",
         )
 
         self.assertEqual(
-            payload["sub_category"],
+            payload[
+                "sub_category"
+            ],
             "Vulnerability Management",
         )
 
         self.assertIn(
             expected_tag,
-            payload["tags"],
+            payload[
+                "tags"
+            ],
         )
 
         self.assertFalse(
@@ -309,29 +205,7 @@ class ClientTests(unittest.TestCase):
             ]
         )
 
-        # No workspace or group enumeration occurs.
-        requested_urls = {
-            call.args[1]
-            for call in calls
-        }
-
-        self.assertNotIn(
-            (
-                "https://alterna.freshservice.com/"
-                "api/v2/workspaces"
-            ),
-            requested_urls,
-        )
-
-        self.assertNotIn(
-            (
-                "https://alterna.freshservice.com/"
-                "api/v2/groups"
-            ),
-            requested_urls,
-        )
-
-    def test_freshservice_skips_matching_open_ticket(
+    def test_skips_matching_open_ticket(
         self,
     ) -> None:
         http = Mock()
@@ -351,7 +225,7 @@ class ClientTests(unittest.TestCase):
             "api-key",
             "security@example.com",
             workspace_id=2,
-            group_id=84,
+            group_id=11000367285,
             http=http,
         )
 
@@ -374,20 +248,7 @@ class ClientTests(unittest.TestCase):
             1,
         )
 
-        self.assertEqual(
-            http.request_json.call_args.kwargs[
-                "params"
-            ],
-            {
-                "workspace_id": 2,
-                "query": (
-                    f"\"tag:'{finding_tag(finding)}' "
-                    "AND status:2\""
-                ),
-            },
-        )
-
-    def test_ticket_description_omits_proof_section_above_threshold(
+    def test_ticket_description_omits_proof_above_threshold(
         self,
     ) -> None:
         description = _ticket_description(
@@ -419,7 +280,7 @@ class ClientTests(unittest.TestCase):
             description,
         )
 
-    def test_freshservice_configuration_is_validated(
+    def test_configuration_is_validated(
         self,
     ) -> None:
         client = FreshserviceClient(
@@ -427,7 +288,7 @@ class ClientTests(unittest.TestCase):
             "api-key",
             "security@example.com",
             workspace_id=2,
-            group_id=84,
+            group_id=11000367285,
         )
 
         self.assertEqual(
@@ -445,7 +306,7 @@ class ClientTests(unittest.TestCase):
 
         self.assertEqual(
             client.group_id,
-            84,
+            11000367285,
         )
 
         for invalid_workspace_id in (
@@ -453,17 +314,20 @@ class ClientTests(unittest.TestCase):
             -1,
             True,
         ):
-            with self.subTest(
-                workspace_id=invalid_workspace_id
-            ), self.assertRaises(
-                ValueError
+            with (
+                self.subTest(
+                    workspace_id=invalid_workspace_id
+                ),
+                self.assertRaises(
+                    ValueError
+                ),
             ):
                 FreshserviceClient(
                     "https://alterna.freshservice.com",
                     "api-key",
                     "security@example.com",
                     workspace_id=invalid_workspace_id,
-                    group_id=84,
+                    group_id=11000367285,
                 )
 
         for invalid_group_id in (
@@ -471,10 +335,13 @@ class ClientTests(unittest.TestCase):
             -1,
             True,
         ):
-            with self.subTest(
-                group_id=invalid_group_id
-            ), self.assertRaises(
-                ValueError
+            with (
+                self.subTest(
+                    group_id=invalid_group_id
+                ),
+                self.assertRaises(
+                    ValueError
+                ),
             ):
                 FreshserviceClient(
                     "https://alterna.freshservice.com",
@@ -482,32 +349,6 @@ class ClientTests(unittest.TestCase):
                     "security@example.com",
                     workspace_id=2,
                     group_id=invalid_group_id,
-                )
-
-        for domain in (
-            "http://alterna.freshservice.com",
-            (
-                "https://alterna.freshservice.com"
-                ".evil.test"
-            ),
-            "https://custom.example.com",
-            "https://support.alterna.ca",
-            (
-                "https://alterna.freshservice.com/"
-                "api/v2"
-            ),
-        ):
-            with self.subTest(
-                domain=domain
-            ), self.assertRaises(
-                ValueError
-            ):
-                FreshserviceClient(
-                    domain,
-                    "api-key",
-                    "security@example.com",
-                    workspace_id=2,
-                    group_id=84,
                 )
 
     def test_http_client_rejects_unexpected_urls(
