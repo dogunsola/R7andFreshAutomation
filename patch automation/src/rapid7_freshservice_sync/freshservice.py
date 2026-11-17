@@ -14,14 +14,10 @@ from .models import (
 
 OPEN_STATUSES = (2, 3)
 
-WORKSPACE_NAME = "IT, Banking Support & Marketing"
-GROUP_NAME = "Service Desk"
-
 TICKET_CATEGORY = "Digital Security"
 TICKET_SUB_CATEGORY = "Vulnerability Management"
 
 MEDIUM = 2
-RESOURCE_PAGE_SIZE = 100
 
 
 class FreshserviceClient:
@@ -30,6 +26,8 @@ class FreshserviceClient:
         domain: str,
         api_key: str,
         requester_email: str,
+        workspace_id: int,
+        group_id: int,
         http: HttpClient | None = None,
     ) -> None:
         normalized_domain = domain.strip().rstrip("/")
@@ -84,13 +82,31 @@ class FreshserviceClient:
                 "Freshservice requester email is required"
             )
 
+        if (
+            isinstance(workspace_id, bool)
+            or not isinstance(workspace_id, int)
+            or workspace_id <= 0
+        ):
+            raise ValueError(
+                "Freshservice workspace ID must be a positive integer"
+            )
+
+        if (
+            isinstance(group_id, bool)
+            or not isinstance(group_id, int)
+            or group_id <= 0
+        ):
+            raise ValueError(
+                "Freshservice group ID must be a positive integer"
+            )
+
         self.base_url = (
             f"https://{parsed.netloc}/api/v2"
         )
 
-        self.requester_email = (
-            requester_email.strip()
-        )
+        self.requester_email = requester_email.strip()
+        self.workspace_id = workspace_id
+        self.group_id = group_id
 
         token = base64.b64encode(
             f"{api_key.strip()}:X".encode()
@@ -109,20 +125,16 @@ class FreshserviceClient:
             )
         )
 
-        self._workspace_id: int | None = None
-        self._group_id: int | None = None
-
     def create_ticket_if_missing(
         self,
         finding: Finding,
     ) -> dict[str, Any] | None:
         """
-        Create a Freshservice ticket unless an Open or Pending
-        ticket with the same stable remediation tag already exists.
+        Create a ticket in the explicitly configured workspace and group.
 
-        Freshservice requires the complete ticket filter expression
-        to be enclosed in double quotes. workspace_id=0 searches all
-        accessible workspaces.
+        Duplicate detection is limited to that same workspace. This client
+        does not enumerate Freshservice workspaces or groups and does not
+        consider tickets in any other workspace.
         """
 
         tag = finding_tag(finding)
@@ -137,7 +149,7 @@ class FreshserviceClient:
                 "GET",
                 f"{self.base_url}/tickets/filter",
                 params={
-                    "workspace_id": 0,
+                    "workspace_id": self.workspace_id,
                     "query": query,
                 },
             )
@@ -157,10 +169,6 @@ class FreshserviceClient:
             if tickets:
                 return None
 
-        workspace_id, group_id = (
-            self._ticket_routing_ids()
-        )
-
         payload = {
             "email": self.requester_email,
             "subject": _ticket_subject(
@@ -173,8 +181,8 @@ class FreshserviceClient:
             "impact": MEDIUM,
             "priority": MEDIUM,
             "status": 2,
-            "workspace_id": workspace_id,
-            "group_id": group_id,
+            "workspace_id": self.workspace_id,
+            "group_id": self.group_id,
             "category": TICKET_CATEGORY,
             "sub_category": TICKET_SUB_CATEGORY,
             "tags": [
@@ -207,151 +215,15 @@ class FreshserviceClient:
 
         return ticket
 
-    def _ticket_routing_ids(
-        self,
-    ) -> tuple[int, int]:
-        if self._workspace_id is None:
-            self._workspace_id = (
-                self._find_resource_id(
-                    "/workspaces",
-                    "workspaces",
-                    WORKSPACE_NAME,
-                )
-            )
-
-        if self._group_id is None:
-            self._group_id = (
-                self._find_resource_id(
-                    "/groups",
-                    "groups",
-                    GROUP_NAME,
-                    params={
-                        "workspace_id":
-                            self._workspace_id,
-                    },
-                )
-            )
-
-        return (
-            self._workspace_id,
-            self._group_id,
-        )
-
-    def _find_resource_id(
-        self,
-        path: str,
-        resource_key: str,
-        name: str,
-        *,
-        params: dict[str, Any] | None = None,
-    ) -> int:
-        resources = self._list_resources(
-            path,
-            resource_key,
-            params=params,
-        )
-
-        matches = [
-            resource
-            for resource in resources
-            if resource.get("name") == name
-        ]
-
-        if len(matches) != 1:
-            raise ApiError(
-                "Expected exactly one Freshservice "
-                f"{resource_key[:-1]} named "
-                f"{name!r}; found {len(matches)}"
-            )
-
-        resource_id = matches[0].get("id")
-
-        if (
-            isinstance(resource_id, bool)
-            or not isinstance(
-                resource_id,
-                (int, str),
-            )
-        ):
-            raise ApiError(
-                f"Freshservice {resource_key[:-1]} "
-                f"{name!r} has an invalid ID"
-            )
-
-        if (
-            isinstance(resource_id, str)
-            and not resource_id.isdecimal()
-        ):
-            raise ApiError(
-                f"Freshservice {resource_key[:-1]} "
-                f"{name!r} has an invalid ID"
-            )
-
-        parsed_id = int(resource_id)
-
-        if parsed_id <= 0:
-            raise ApiError(
-                f"Freshservice {resource_key[:-1]} "
-                f"{name!r} has an invalid ID"
-            )
-
-        return parsed_id
-
-    def _list_resources(
-        self,
-        path: str,
-        resource_key: str,
-        *,
-        params: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        page = 1
-        resources: list[dict[str, Any]] = []
-
-        while True:
-            response = self.http.request_json(
-                "GET",
-                f"{self.base_url}{path}",
-                params={
-                    **(params or {}),
-                    "page": page,
-                    "per_page": RESOURCE_PAGE_SIZE,
-                },
-            )
-
-            batch = (
-                response.get(resource_key)
-                if isinstance(response, dict)
-                else None
-            )
-
-            if (
-                not isinstance(batch, list)
-                or any(
-                    not isinstance(resource, dict)
-                    for resource in batch
-                )
-            ):
-                raise ApiError(
-                    f"Freshservice {resource_key} list "
-                    "returned an invalid response"
-                )
-
-            resources.extend(batch)
-
-            if len(batch) < RESOURCE_PAGE_SIZE:
-                return resources
-
-            page += 1
-
 
 def finding_tag(
     finding: Finding,
 ) -> str:
     """
-    Return a stable Freshservice tag for the remediation.
+    Generate a stable remediation tag for duplicate detection.
 
-    A Rapid7 solution ID takes precedence when available. Catalog
-    fallback findings use solution text and fix details instead.
+    Detailed Rapid7 solutions include the solution ID. Catalog fallback
+    findings use solution text and fix details.
     """
 
     if finding.solution_id:
@@ -394,7 +266,7 @@ def _ticket_description(
     """
     Build the Freshservice HTML description.
 
-    All Rapid7-supplied values are HTML-escaped before insertion.
+    Rapid7-supplied values are HTML-escaped before insertion.
     """
 
     assets = (
@@ -482,7 +354,6 @@ def _ticket_description(
                 f"<tbody>{proof_rows}</tbody>"
                 "</table>"
             )
-
         else:
             proof_content = (
                 "<p>"
