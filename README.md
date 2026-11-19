@@ -81,8 +81,8 @@ your retention policy.
 
 ## Azure Pipelines
 
-The scheduled pipeline runs the tests and sync daily. Configure these variables
-in the existing `Patch Automation` variable group and Key Vault:
+The scheduled pipeline runs the tests and sync weekly. Configure these variables
+in the existing `New version for automation` variable group and Key Vault:
 
 - `Rapid7-Console-URL`
 - `Rapid7-Console-Username`
@@ -93,6 +93,12 @@ in the existing `Patch Automation` variable group and Key Vault:
 
 The Azure service connection and Key Vault names are configured in
 [`azure-pipelines.yml`](./azure-pipelines.yml).
+
+The self-hosted `Security-Agent-Pool` agent must provide Python 3.11 through
+the Azure Pipelines tool cache. The pipeline selects that version with
+`UsePythonVersion@0`, verifies it is at least Python 3.10, installs the project
+with its test dependencies, compiles the application modules, and runs the full
+test suite before the sync job runs.
 
 ## Rapid7 selection and export
 
@@ -112,8 +118,12 @@ retrieved for solutions affecting more than five vulnerabilities; the export
 and ticket state that the threshold was exceeded.
 
 Findings are grouped by solution ID, solution, and fix details, with affected
-hosts listed in the CSV and Freshservice ticket. Missing hostnames are skipped
-by default; use `--hostname-fallback ip` to use an asset IP instead.
+hosts listed in the CSV and Freshservice ticket. If a software family has one
+"latest version" remediation, version-pinned updates for that same normalized
+family are consolidated into the rollup finding; the rollup retains all
+affected CVEs and assets. Ambiguous families or families with multiple rollups
+remain separate. Missing hostnames are skipped by default; use
+`--hostname-fallback ip` to use an asset IP instead.
 
 ## Azure Key Vault
 

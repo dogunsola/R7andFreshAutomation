@@ -12,6 +12,12 @@ schedules:
 variables:
   - group: "New version for automation"
 
+  # Keep the runner aligned with pyproject.toml (Python 3.10+).
+  # The self-hosted agent must expose this version through the Azure Pipelines
+  # tool cache for UsePythonVersion@0.
+  - name: pythonVersion
+    value: "3.11"
+
 pool:
   name: "Security-Agent-Pool"
   demands:
@@ -25,15 +31,22 @@ jobs:
     steps:
       - checkout: self
 
+      - task: UsePythonVersion@0
+        displayName: Use Python $(pythonVersion)
+        inputs:
+          versionSpec: "$(pythonVersion)"
+
       - script: |
           set -euo pipefail
           cd "patch automation"
 
-          echo "System Python:"
-          python3 --version
-          which python3
+          echo "Selected Python:"
+          python --version
+          which python
 
-          python3 -m venv .venv
+          python -c 'import sys; assert sys.version_info >= (3, 10), sys.version'
+
+          python -m venv .venv
 
           echo "Virtual environment Python:"
           .venv/bin/python --version
