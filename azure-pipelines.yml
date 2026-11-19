@@ -12,12 +12,6 @@ schedules:
 variables:
   - group: "New version for automation"
 
-  # Keep the runner aligned with pyproject.toml (Python 3.10+).
-  # The self-hosted agent must expose this version through the Azure Pipelines
-  # tool cache for UsePythonVersion@0.
-  - name: pythonVersion
-    value: "3.11"
-
 pool:
   name: "Security-Agent-Pool"
   demands:
@@ -31,10 +25,119 @@ jobs:
     steps:
       - checkout: self
 
-      - task: UsePythonVersion@0
-        displayName: Use Python $(pythonVersion)
-        inputs:
-          versionSpec: "$(pythonVersion)"
+      - script: |
+          set -euo pipefail
+
+          if [[ "$(uname -s)" != "Linux" ]]; then
+            echo "Building Python from python.org source requires a Linux agent."
+            exit 1
+          fi
+
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential ca-certificates curl libbz2-dev libexpat1-dev \
+            libffi-dev libgdbm-dev libgdbm-compat-dev liblzma-dev \
+            libncursesw5-dev libnss3-dev libreadline-dev libsqlite3-dev \
+            libssl-dev python3 tk-dev uuid-dev xz-utils zlib1g-dev
+
+          build_dir="$(mktemp -d "$(Agent.TempDirectory)/python-build.XXXXXX")"
+          release_page="$build_dir/release.html"
+          curl --fail --location --retry 3 \
+            https://www.python.org/downloads/latest/ \
+            --output "$release_page"
+
+          release_info="$(python3 - "$release_page" <<'PY'
+          from html.parser import HTMLParser
+          import re
+          import sys
+
+          class ReleasePageParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.heading = []
+                  self.in_heading = False
+                  self.rows = []
+                  self.row = None
+                  self.in_checksum = False
+
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if tag == "h1" and "page-title" in attrs.get("class", "").split():
+                      self.in_heading = True
+                  if tag == "tr":
+                      self.row = {"links": [], "checksum": []}
+                  if self.row is not None and tag == "a" and attrs.get("href"):
+                      self.row["links"].append(attrs["href"])
+                  if (
+                      self.row is not None
+                      and tag == "code"
+                      and "checksum" in attrs.get("class", "").split()
+                  ):
+                      self.in_checksum = True
+
+              def handle_data(self, data):
+                  if self.in_heading:
+                      self.heading.append(data)
+                  if self.row is not None and self.in_checksum:
+                      self.row["checksum"].append(data)
+
+              def handle_endtag(self, tag):
+                  if tag == "h1":
+                      self.in_heading = False
+                  elif tag == "code":
+                      self.in_checksum = False
+                  elif tag == "tr" and self.row is not None:
+                      self.rows.append(self.row)
+                      self.row = None
+
+          with open(sys.argv[1], encoding="utf-8") as release_page:
+              parser = ReleasePageParser()
+              parser.feed(release_page.read())
+
+          heading = "".join(parser.heading).strip()
+          match = re.fullmatch(r"Python (3\.\d+\.\d+)", heading)
+          if not match:
+              raise RuntimeError(f"Could not identify latest stable Python 3 release: {heading!r}")
+
+          version = match.group(1)
+          archive = f"Python-{version}.tar.xz"
+          checksum = next(
+              (
+                  "".join(row["checksum"]).strip()
+                  for row in parser.rows
+                  if any(link.endswith(archive) for link in row["links"])
+              ),
+              "",
+          )
+          if not re.fullmatch(r"[0-9a-fA-F]{64}", checksum):
+              raise RuntimeError(f"Could not find the official SHA-256 for {archive}")
+
+          print(version, checksum)
+          PY
+          )"
+          read -r python_version expected_sha256 <<< "$release_info"
+          echo "Building Python $python_version from python.org"
+
+          archive="$build_dir/Python-$python_version.tar.xz"
+          curl --fail --location --retry 3 \
+            "https://www.python.org/ftp/python/$python_version/Python-$python_version.tar.xz" \
+            --output "$archive"
+          echo "$expected_sha256  $archive" | sha256sum --check
+
+          tar -xJf "$archive" -C "$build_dir"
+          install_dir="$build_dir/install"
+          mkdir -p "$install_dir"
+          cd "$build_dir/Python-$python_version"
+          ./configure --prefix="$install_dir" --with-ensurepip=install
+          make -j"$(nproc)"
+          make install
+
+          if [[ ! -x "$install_dir/bin/python" ]]; then
+            ln -s python3 "$install_dir/bin/python"
+          fi
+          "$install_dir/bin/python" --version
+          echo "##vso[task.prependpath]$install_dir/bin"
+        displayName: Build latest stable Python from python.org
 
       - script: |
           set -euo pipefail
