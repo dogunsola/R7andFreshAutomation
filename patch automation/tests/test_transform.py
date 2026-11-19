@@ -555,6 +555,156 @@ class TransformTests(unittest.TestCase):
             ],
         )
 
+    def test_transform_prefers_latest_version_over_specific_updates(
+        self,
+    ) -> None:
+        catalog = {
+            "vuln-1": (
+                "critical",
+                "Example Service",
+                "Upgrade",
+                "",
+            )
+        }
+
+        assets = [
+            {
+                "id": 10,
+                "host_name": "host-a",
+                "new": [
+                    {
+                        "vulnerability_id": "vuln-1",
+                    }
+                ],
+            }
+        ]
+
+        solutions = [
+            {
+                "id": "latest",
+                "summary": {
+                    "text": "Upgrade to the latest version",
+                },
+                "steps": {
+                    "text": "Use the vendor's current release.",
+                },
+            },
+            {
+                "id": "specific",
+                "summary": {
+                    "text": "Upgrade to version 4.2.1",
+                },
+                "steps": {
+                    "text": "Install version 4.2.1.",
+                },
+            },
+            {
+                "id": "config",
+                "summary": {
+                    "text": "Disable the vulnerable feature",
+                },
+                "steps": {
+                    "text": "Update the service configuration.",
+                },
+            },
+        ]
+
+        findings, _ = transform_assets(
+            assets,
+            catalog,
+            solution_lookup=lambda _vulnerability_id: solutions,
+        )
+
+        self.assertEqual(
+            [
+                finding.solution_id
+                for finding in findings
+            ],
+            [
+                "config",
+                "latest",
+            ],
+        )
+
+    def test_transform_consolidates_matching_family_across_cves(
+        self,
+    ) -> None:
+        catalog = {
+            "cve-a": (
+                "critical",
+                "Example Service",
+                "Upgrade",
+                "",
+            ),
+            "cve-b": (
+                "critical",
+                "Example Service - security update",
+                "Upgrade",
+                "",
+            ),
+        }
+
+        assets = [
+            {
+                "id": 10,
+                "host_name": "host-a",
+                "new": [
+                    {
+                        "vulnerability_id": "cve-a",
+                    },
+                    {
+                        "vulnerability_id": "cve-b",
+                    },
+                ],
+            }
+        ]
+
+        solutions = {
+            "cve-a": [
+                {
+                    "id": "latest",
+                    "summary": {
+                        "text": "Upgrade to the latest version",
+                    },
+                    "steps": {
+                        "text": "Use the vendor's current release.",
+                    },
+                },
+            ],
+            "cve-b": [
+                {
+                    "id": "specific",
+                    "summary": {
+                        "text": "Upgrade to version 4.2.1",
+                    },
+                    "steps": {
+                        "text": "Install version 4.2.1.",
+                    },
+                },
+            ],
+        }
+
+        findings, _ = transform_assets(
+            assets,
+            catalog,
+            solution_lookup=lambda vulnerability_id: solutions[
+                vulnerability_id
+            ],
+        )
+
+        self.assertEqual(
+            len(findings),
+            1,
+        )
+        self.assertEqual(
+            findings[0].solution_id,
+            "latest",
+        )
+        self.assertEqual(
+            findings[0].vulnerability_count,
+            2,
+        )
+
     def test_ip_fallback_and_csv_format(
         self,
     ) -> None:

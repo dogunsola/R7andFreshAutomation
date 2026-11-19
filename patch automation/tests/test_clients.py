@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 from rapid7_freshservice_sync.freshservice import (
@@ -18,6 +19,18 @@ class ClientTests(unittest.TestCase):
     def test_console_assets_pagination_membership_and_active_findings(
         self,
     ) -> None:
+        recent_scan_date = datetime.now(
+            timezone.utc
+        ).isoformat()
+        stale_scan_date = (
+            datetime.now(
+                timezone.utc
+            )
+            - timedelta(
+                days=8
+            )
+        ).isoformat()
+
         def page(
             resources,
             total=1,
@@ -63,6 +76,7 @@ class ClientTests(unittest.TestCase):
                 "resources": [
                     10,
                     20,
+                    30,
                 ]
             },
 
@@ -76,6 +90,12 @@ class ClientTests(unittest.TestCase):
                         "id": 10,
                         "hostName": "host-a",
                         "ip": "10.0.0.1",
+                        "lastScanDate": recent_scan_date,
+                    },
+                    {
+                        "id": 30,
+                        "hostName": "stale-host",
+                        "lastScanDate": stale_scan_date,
                     },
                 ],
                 2,
@@ -87,6 +107,7 @@ class ClientTests(unittest.TestCase):
                     {
                         "id": 20,
                         "ip": "10.0.0.2",
+                        "lastScanDate": recent_scan_date,
                     }
                 ],
                 2,
