@@ -2,6 +2,7 @@ import csv
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +23,9 @@ class ConsoleExportTests(unittest.TestCase):
 
         workspace_id = 2
         group_id = 11000367285
+        recent_scan_date = datetime.now(
+            timezone.utc
+        ).isoformat()
 
         def page(records):
             return {
@@ -60,6 +64,7 @@ class ConsoleExportTests(unittest.TestCase):
                         "id": 42,
                         "hostName": "laptop.example",
                         "ip": "192.0.2.10",
+                        "lastScanDate": recent_scan_date,
                     }
                 ]
             ),

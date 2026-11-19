@@ -43,6 +43,114 @@ MICROSOFT_TOKENS = (
     "sql server",
 )
 
+LATEST_VERSION_PATTERN = re.compile(
+    r"\b(?:latest|newest|most\s+recent)\s+(?:available\s+)?version\b",
+    re.IGNORECASE,
+)
+
+SPECIFIC_VERSION_PATTERN = re.compile(
+    r"\b(?:version|v)\s*\d+(?:\.\d+)+\b"
+    r"|\b(?:update|upgrade|install)\b.{0,80}?\b\d+(?:\.\d+)+\b",
+    re.IGNORECASE,
+)
+
+
+def _exclude_redundant_version_remediations(
+    remediations: list[tuple[str, str, str]],
+) -> list[tuple[str, str, str]]:
+    """Prefer a latest-version remediation over specific version updates."""
+    if not any(
+        LATEST_VERSION_PATTERN.search(
+            f"{solution} {fix_details}"
+        )
+        for _, solution, fix_details in remediations
+    ):
+        return remediations
+
+    return [
+        remediation
+        for remediation in remediations
+        if not SPECIFIC_VERSION_PATTERN.search(
+            f"{remediation[1]} {remediation[2]}"
+        )
+        or LATEST_VERSION_PATTERN.search(
+            f"{remediation[1]} {remediation[2]}"
+        )
+    ]
+
+
+def _consolidate_product_family_rollups(
+    findings: dict[tuple[str, str, str], dict[str, Any]],
+) -> None:
+    """Merge version-pinned findings into one latest-version rollup.
+
+    This is deliberately conservative: different Rapid7 solution IDs are
+    consolidated only when every vulnerability in each finding has the same
+    normalized software family and that family has exactly one rollup.
+    """
+    rollups_by_family: dict[
+        str,
+        list[dict[str, Any]],
+    ] = {}
+
+    for entry in findings.values():
+        families = entry["software_families"]
+
+        if (
+            len(families) != 1
+            or not LATEST_VERSION_PATTERN.search(
+                f"{entry['solution']} {entry['fix_details']}"
+            )
+        ):
+            continue
+
+        family = next(iter(families))
+        rollups_by_family.setdefault(
+            family,
+            [],
+        ).append(entry)
+
+    for key, entry in list(findings.items()):
+        families = entry["software_families"]
+
+        if (
+            len(families) != 1
+            or LATEST_VERSION_PATTERN.search(
+                f"{entry['solution']} {entry['fix_details']}"
+            )
+            or not SPECIFIC_VERSION_PATTERN.search(
+                f"{entry['solution']} {entry['fix_details']}"
+            )
+        ):
+            continue
+
+        family = next(iter(families))
+        rollups = rollups_by_family.get(
+            family,
+            [],
+        )
+
+        if len(rollups) != 1:
+            continue
+
+        rollup = rollups[0]
+        rollup["hosts"].update(
+            entry["hosts"]
+        )
+        rollup["assets"].update(
+            entry["assets"]
+        )
+
+        for vulnerability_id, assets in entry[
+            "vulnerabilities"
+        ].items():
+            rollup["vulnerabilities"].setdefault(
+                vulnerability_id,
+                set(),
+            ).update(assets)
+
+        del findings[key]
+
 
 def build_catalog(
     vulnerabilities: Iterable[dict[str, Any]],
@@ -250,6 +358,10 @@ def transform_assets(
                             for record in solution_records
                         ]
 
+                remediations = _exclude_redundant_version_remediations(
+                    remediations
+                )
+
                 for (
                     solution_id,
                     solution,
@@ -267,10 +379,17 @@ def transform_assets(
                             "solution_id": solution_id,
                             "solution": solution,
                             "fix_details": fix_details,
+                            "software_families": set(),
                             "hosts": set(),
                             "assets": {},
                             "vulnerabilities": {},
                         },
+                    )
+
+                    group["software_families"].add(
+                        _normalize_software_name(
+                            software
+                        ).casefold()
                     )
 
                     group["hosts"].add(
@@ -296,6 +415,10 @@ def transform_assets(
                             host,
                         )
                     )
+
+    _consolidate_product_family_rollups(
+        findings
+    )
 
     ordered: list[Finding] = []
 

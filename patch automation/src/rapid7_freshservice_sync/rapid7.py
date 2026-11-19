@@ -2,6 +2,7 @@ import base64
 import logging
 import time
 from collections.abc import Iterable, Iterator
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -14,6 +15,7 @@ DEFAULT_RAPID7_TIMEOUT_SECONDS = 300
 ASSET_SEARCH_TIMEOUT_SECONDS = 300
 ASSET_SEARCH_RETRIES = 2
 PROGRESS_INTERVAL = 100
+RECENT_SCAN_DAYS = 7
 
 
 class Rapid7SolutionClient:
@@ -503,6 +505,68 @@ class Rapid7SolutionClient:
 
 
 class Rapid7Client(Rapid7SolutionClient):
+    @staticmethod
+    def _was_scanned_within(
+        asset: dict[str, Any],
+        *,
+        days: int,
+        now: datetime,
+    ) -> bool:
+        """Return whether an asset's latest scan is within ``days``.
+
+        ``/assets/search`` normally applies this filter itself, but some
+        Security Console versions can return assets outside the requested
+        relative-date window.  Check the returned value as well so a stale
+        asset cannot produce a ticket.
+        """
+        scanned_at = asset.get(
+            "lastScanDate"
+        )
+
+        if not isinstance(
+            scanned_at,
+            str,
+        ):
+            LOG.warning(
+                "Skipping Rapid7 asset %r because it has no lastScanDate",
+                asset.get(
+                    "id"
+                ),
+            )
+            return False
+
+        try:
+            parsed_scan_time = datetime.fromisoformat(
+                scanned_at.replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+        except ValueError:
+            LOG.warning(
+                "Skipping Rapid7 asset %r with invalid lastScanDate %r",
+                asset.get(
+                    "id"
+                ),
+                scanned_at,
+            )
+            return False
+
+        if parsed_scan_time.tzinfo is None:
+            parsed_scan_time = parsed_scan_time.replace(
+                tzinfo=timezone.utc
+            )
+
+        return (
+            now - timedelta(
+                days=days
+            )
+            <= parsed_scan_time.astimezone(
+                timezone.utc
+            )
+            <= now
+        )
+
     def _pages(
         self,
         path: str,
@@ -781,14 +845,15 @@ class Rapid7Client(Rapid7SolutionClient):
                 {
                     "field": "last-scan-date",
                     "operator": "is-within-the-last",
-                    "value": 7,
+                    "value": RECENT_SCAN_DAYS,
                 },
             ],
         }
 
         LOG.info(
             "Searching Rapid7 for assets scanned "
-            "within the last 7 days"
+            "within the last %s days",
+            RECENT_SCAN_DAYS,
         )
 
         recent_assets = list(
@@ -809,6 +874,10 @@ class Rapid7Client(Rapid7SolutionClient):
             ),
         )
 
+        now = datetime.now(
+            timezone.utc
+        )
+
         scoped_assets = [
             asset
             for asset in recent_assets
@@ -818,6 +887,11 @@ class Rapid7Client(Rapid7SolutionClient):
                 )
             )
             in member_ids
+            and self._was_scanned_within(
+                asset,
+                days=RECENT_SCAN_DAYS,
+                now=now,
+            )
         ]
 
         LOG.info(
